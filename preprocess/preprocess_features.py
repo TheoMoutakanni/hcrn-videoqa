@@ -227,8 +227,8 @@ if __name__ == '__main__':
 
     # annotation files
     if args.dataset == 'tgif-qa':
-        args.annotation_file = '/ceph-g/lethao/datasets/tgif-qa/csv/Total_{}_question.csv'
-        args.video_dir = '/ceph-g/lethao/datasets/tgif-qa/gifs'
+        args.annotation_file = '/mnt/285EDDF95EDDC02C/Users/Public/Documents/VideoDatasets/TGIF-QA/csv/Total_{}_question.csv'
+        args.video_dir = '/mnt/285EDDF95EDDC02C/Users/Public/Documents/VideoDatasets/TGIF-QA/gifs'
         args.outfile = 'data/{}/{}/{}_{}_{}_feat.h5'
         video_paths = tgif_qa.load_video_paths(args)
         random.shuffle(video_paths)
@@ -240,8 +240,8 @@ if __name__ == '__main__':
         generate_h5(model, video_paths, args.num_clips,
                     args.outfile.format(args.dataset, args.question_type, args.dataset, args.question_type, args.feature_type))
     elif args.dataset == 'msrvtt-qa':
-        args.annotation_file = '/ceph-g/lethao/datasets/msrvtt/annotations/{}_qa.json'
-        args.video_dir = '/ceph-g/lethao/datasets/msrvtt/videos/'
+        args.annotation_file = '/mnt/285EDDF95EDDC02C/Users/Public/Documents/VideoDatasets/MSRVTT-QA/annotations/{}_qa.json'
+        args.video_dir = '/mnt/285EDDF95EDDC02C/Users/Public/Documents/VideoDatasets/MSRVTT-QA/videos/'
         video_paths = msrvtt_qa.load_video_paths(args)
         random.shuffle(video_paths)
         # load model
@@ -253,9 +253,9 @@ if __name__ == '__main__':
                     args.outfile.format(args.dataset, args.dataset, args.feature_type))
 
     elif args.dataset == 'msvd-qa':
-        args.annotation_file = '/ceph-g/lethao/datasets/msvd/MSVD-QA/{}_qa.json'
-        args.video_dir = '/ceph-g/lethao/datasets/msvd/MSVD-QA/video/'
-        args.video_name_mapping = '/ceph-g/lethao/datasets/msvd/youtube_mapping.txt'
+        args.annotation_file = '/mnt/285EDDF95EDDC02C/Users/Public/Documents/VideoDatasets/MSVD-QA/{}_qa.json'
+        args.video_dir = '/mnt/285EDDF95EDDC02C/Users/Public/Documents/VideoDatasets/MSVD-QA/video/'
+        args.video_name_mapping = '/mnt/285EDDF95EDDC02C/Users/Public/Documents/VideoDatasets/MSVD-QA/youtube_mapping.txt'
         video_paths = msvd_qa.load_video_paths(args)
         random.shuffle(video_paths)
         # load model
