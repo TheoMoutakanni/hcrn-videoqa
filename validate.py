@@ -104,6 +104,9 @@ if __name__ == '__main__':
 
         cfg.dataset.appearance_feat = os.path.join(cfg.dataset.data_dir, cfg.dataset.appearance_feat.format(cfg.dataset.name, cfg.dataset.question_type))
         cfg.dataset.motion_feat = os.path.join(cfg.dataset.data_dir, cfg.dataset.motion_feat.format(cfg.dataset.name, cfg.dataset.question_type))
+        if cfg.bert.flag:
+            cfg.bert.test_question_feat = os.path.join(cfg.dataset.data_dir, cfg.bert.test_question_feat.format(cfg.dataset.name, cfg.dataset.question_type))
+
     else:
         cfg.dataset.question_type = 'none'
         cfg.dataset.appearance_feat = '{}_appearance_feat.h5'
@@ -117,6 +120,9 @@ if __name__ == '__main__':
 
         cfg.dataset.appearance_feat = os.path.join(cfg.dataset.data_dir, cfg.dataset.appearance_feat.format(cfg.dataset.name))
         cfg.dataset.motion_feat = os.path.join(cfg.dataset.data_dir, cfg.dataset.motion_feat.format(cfg.dataset.name))
+        if cfg.bert.flag:
+            cfg.bert.test_question_feat = '{}_test_questions_feat.h5'
+            cfg.bert.test_question_feat = os.path.join(cfg.dataset.data_dir, cfg.bert.test_question_feat.format(cfg.dataset.name))
 
     test_loader_kwargs = {
         'question_type': cfg.dataset.question_type,
@@ -129,6 +135,8 @@ if __name__ == '__main__':
         'num_workers': cfg.num_workers,
         'shuffle': False
     }
+    if cfg.bert.flag:
+        test_loader_kwargs['question_feat'] = cfg.bert.test_question_feat
     test_loader = VideoQADataLoader(**test_loader_kwargs)
     model_kwargs.update({'vocab': test_loader.vocab})
     model = HCRN.HCRNNetwork(**model_kwargs).to(device)

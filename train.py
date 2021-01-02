@@ -37,6 +37,8 @@ def train(cfg):
         'num_workers': cfg.num_workers,
         'shuffle': True
     }
+    if cfg.bert.flag:
+        train_loader_kwargs['question_feat'] = cfg.bert.train_question_feat
     train_loader = VideoQADataLoader(**train_loader_kwargs)
     logging.info("number of train instances: {}".format(len(train_loader.dataset)))
     if cfg.val.flag:
@@ -51,6 +53,8 @@ def train(cfg):
             'num_workers': cfg.num_workers,
             'shuffle': False
         }
+        if cfg.bert.flag:
+            val_loader_kwargs['question_feat'] = cfg.bert.val_question_feat
         val_loader = VideoQADataLoader(**val_loader_kwargs)
         logging.info("number of val instances: {}".format(len(val_loader.dataset)))
 
@@ -66,6 +70,9 @@ def train(cfg):
         'vocab': train_loader.vocab,
         'question_type': cfg.dataset.question_type
     }
+    if cfg.bert.flag:
+        model_kwargs['bert'] = True
+        model_kwargs['word_dim'] = cfg.bert.word_dim
     model_kwargs_tosave = {k: v for k, v in model_kwargs.items() if k != 'vocab'}
     model = HCRN.HCRNNetwork(**model_kwargs).to(device)
     pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -266,6 +273,9 @@ def main():
     assert cfg.train.k_max_frame_level <= 16
     assert cfg.train.k_max_clip_level <= 8
 
+    # check if bert and glove are not set in the same cfg
+    assert not (cfg.train.glove and cfg.bert.flag)
+
 
     if not cfg.multi_gpus:
         torch.cuda.set_device(cfg.gpu_id)
@@ -298,6 +308,9 @@ def main():
 
         cfg.dataset.appearance_feat = os.path.join(cfg.dataset.data_dir, cfg.dataset.appearance_feat.format(cfg.dataset.name, cfg.dataset.question_type))
         cfg.dataset.motion_feat = os.path.join(cfg.dataset.data_dir, cfg.dataset.motion_feat.format(cfg.dataset.name, cfg.dataset.question_type))
+        if cfg.bert.flag:
+            cfg.bert.train_question_feat = os.path.join(cfg.dataset.data_dir, cfg.bert.train_question_feat.format(cfg.dataset.name, cfg.dataset.question_type))
+            cfg.bert.val_question_feat = os.path.join(cfg.dataset.data_dir, cfg.bert.val_question_feat.format(cfg.dataset.name, cfg.dataset.question_type))
     else:
         cfg.dataset.question_type = 'none'
         cfg.dataset.appearance_feat = '{}_appearance_feat.h5'
@@ -313,6 +326,12 @@ def main():
 
         cfg.dataset.appearance_feat = os.path.join(cfg.dataset.data_dir, cfg.dataset.appearance_feat.format(cfg.dataset.name))
         cfg.dataset.motion_feat = os.path.join(cfg.dataset.data_dir, cfg.dataset.motion_feat.format(cfg.dataset.name))
+        if cfg.bert.flag:
+            cfg.bert.train_question_feat = '{}_train_questions_feat.h5'
+            cfg.bert.train_question_feat = os.path.join(cfg.dataset.data_dir, cfg.bert.train_question_feat.format(cfg.dataset.name))
+            cfg.bert.val_question_feat = '{}_val_questions_feat.h5'
+            cfg.bert.val_question_feat = os.path.join(cfg.dataset.data_dir, cfg.bert.val_question_feat.format(cfg.dataset.name))
+
 
     # set random seed
     torch.manual_seed(cfg.seed)

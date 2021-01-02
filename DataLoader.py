@@ -43,10 +43,13 @@ def load_vocab(path):
 class VideoQADataset(Dataset):
 
     def __init__(self, answers, ans_candidates, ans_candidates_len, questions, questions_len, video_ids, q_ids,
-                 app_feature_h5, app_feat_id_to_index, motion_feature_h5, motion_feat_id_to_index):
+                 app_feature_h5, app_feat_id_to_index, motion_feature_h5, motion_feat_id_to_index,
+                 question_feature_h5=None, question_feat_id_to_index=None):
         # convert data to tensor
         self.all_answers = answers
-        self.all_questions = torch.LongTensor(np.asarray(questions))
+        if question_feature_h5 is None:
+            self.all_questions = torch.LongTensor(np.asarray(questions))
+        self.question_feature_h5 = question_feature_h5
         self.all_questions_len = torch.LongTensor(np.asarray(questions_len))
         self.all_video_ids = torch.LongTensor(np.asarray(video_ids))
         self.all_q_ids = q_ids
@@ -54,6 +57,7 @@ class VideoQADataset(Dataset):
         self.motion_feature_h5 = motion_feature_h5
         self.app_feat_id_to_index = app_feat_id_to_index
         self.motion_feat_id_to_index = motion_feat_id_to_index
+        self.question_feat_id_to_index = question_feat_id_to_index
 
         if not np.any(ans_candidates):
             self.question_type = 'openended'
@@ -69,12 +73,19 @@ class VideoQADataset(Dataset):
         if self.question_type == 'mulchoices':
             ans_candidates = self.all_ans_candidates[index]
             ans_candidates_len = self.all_ans_candidates_len[index]
-        question = self.all_questions[index]
-        question_len = self.all_questions_len[index]
         video_idx = self.all_video_ids[index].item()
         question_idx = self.all_q_ids[index]
         app_index = self.app_feat_id_to_index[str(video_idx)]
         motion_index = self.motion_feat_id_to_index[str(video_idx)]
+        if self.question_feature_h5 is None:
+            question = self.all_questions[index]
+            question_len = self.all_questions_len[index]
+        else:
+            question_index = self.question_feat_id_to_index[str(video_idx)]
+            with h5py.File(self.question_feature_h5, 'r') as f_question:
+                question = f_question['question_features'][question_index]
+                question_len = f_question['question_len'][question_index]
+            question = torch.from_numpy(question)
         with h5py.File(self.app_feature_h5, 'r') as f_app:
             appearance_feat = f_app['resnet_features'][app_index]  # (8, 16, 2048)
         with h5py.File(self.motion_feature_h5, 'r') as f_motion:
@@ -86,7 +97,7 @@ class VideoQADataset(Dataset):
             question_len)
 
     def __len__(self):
-        return len(self.all_questions)
+        return len(self.all_video_ids)
 
 
 class VideoQADataLoader(DataLoader):
@@ -99,9 +110,11 @@ class VideoQADataLoader(DataLoader):
         question_pt_path = str(kwargs.pop('question_pt'))
         print('loading questions from %s' % (question_pt_path))
         question_type = kwargs.pop('question_type')
+        questions = None
         with open(question_pt_path, 'rb') as f:
             obj = pickle.load(f)
-            questions = obj['questions']
+            if 'question_feat' not in kwargs:
+                questions = obj['questions']
             questions_len = obj['questions_len']
             video_ids = obj['video_ids']
             q_ids = obj['question_id']
@@ -112,11 +125,11 @@ class VideoQADataLoader(DataLoader):
             if question_type in ['action', 'transition']:
                 ans_candidates = obj['ans_candidates']
                 ans_candidates_len = obj['ans_candidates_len']
-
         if 'train_num' in kwargs:
             trained_num = kwargs.pop('train_num')
             if trained_num > 0:
-                questions = questions[:trained_num]
+                if 'question_feat' not in kwargs:
+                    questions = questions[:trained_num]
                 questions_len = questions_len[:trained_num]
                 video_ids = video_ids[:trained_num]
                 q_ids = q_ids[:trained_num]
@@ -127,7 +140,8 @@ class VideoQADataLoader(DataLoader):
         if 'val_num' in kwargs:
             val_num = kwargs.pop('val_num')
             if val_num > 0:
-                questions = questions[:val_num]
+                if 'question_feat' not in kwargs:
+                    questions = questions[:val_num]
                 questions_len = questions_len[:val_num]
                 video_ids = video_ids[:val_num]
                 q_ids = q_ids[:val_num]
@@ -138,7 +152,8 @@ class VideoQADataLoader(DataLoader):
         if 'test_num' in kwargs:
             test_num = kwargs.pop('test_num')
             if test_num > 0:
-                questions = questions[:test_num]
+                if 'question_feat' not in kwargs:
+                    questions = questions[:test_num]
                 questions_len = questions_len[:test_num]
                 video_ids = video_ids[:test_num]
                 q_ids = q_ids[:test_num]
@@ -157,10 +172,18 @@ class VideoQADataLoader(DataLoader):
         motion_feat_id_to_index = {str(id): i for i, id in enumerate(motion_video_ids)}
         self.app_feature_h5 = kwargs.pop('appearance_feat')
         self.motion_feature_h5 = kwargs.pop('motion_feat')
+        if 'question_feat' in kwargs:
+            with h5py.File(kwargs['question_feat'], 'r') as question_features_file:
+                question_video_ids = question_features_file['ids'][()]
+            question_video_id_to_index = {str(id): i for i, id in enumerate(question_video_ids)}
+            self.question_feature_h5 = kwargs.pop('question_feat')
+        else:
+            self.question_feature_h5 = None
+            question_video_id_to_index = None
         self.dataset = VideoQADataset(answers, ans_candidates, ans_candidates_len, questions, questions_len,
                                       video_ids, q_ids,
                                       self.app_feature_h5, app_feat_id_to_index, self.motion_feature_h5,
-                                      motion_feat_id_to_index)
+                                      motion_feat_id_to_index, self.question_feature_h5, question_video_id_to_index)
 
         self.vocab = vocab
         self.batch_size = kwargs['batch_size']

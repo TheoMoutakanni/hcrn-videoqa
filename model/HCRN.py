@@ -76,6 +76,46 @@ class InputUnitLinguistic(nn.Module):
         return question_embedding
 
 
+class InputUnitLinguisticPrecomputed(nn.Module):
+    def __init__(self, wordvec_dim=768, rnn_dim=512, module_dim=512, bidirectional=True):
+        super(InputUnitLinguisticPrecomputed, self).__init__()
+
+        self.dim = module_dim
+
+        self.bidirectional = bidirectional
+        if bidirectional:
+            rnn_dim = rnn_dim // 2
+
+        self.encoder_fc = nn.Linear(wordvec_dim, wordvec_dim)
+        self.tanh = nn.Tanh()
+        self.encoder = nn.LSTM(wordvec_dim, rnn_dim, batch_first=True, bidirectional=bidirectional)
+        self.embedding_dropout = nn.Dropout(p=0.15)
+        self.question_dropout = nn.Dropout(p=0.18)
+
+        self.module_dim = module_dim
+
+    def forward(self, questions_embedding, question_len):
+        """
+        Args:
+            questions_embedding: [Tensor] (batch_size, max_question_length, wordvec_dim)
+            question_len: [Tensor] (batch_size)
+        return:
+            question representation [Tensor] (batch_size, module_dim)
+        """
+        # questions_embedding = self.encoder_fc(questions_embedding)
+        embed = self.tanh(self.embedding_dropout(questions_embedding))
+        embed = nn.utils.rnn.pack_padded_sequence(embed, question_len, batch_first=True,
+                                                  enforce_sorted=False)
+
+        self.encoder.flatten_parameters()
+        _, (question_embedding, _) = self.encoder(embed)
+        if self.bidirectional:
+            question_embedding = torch.cat([question_embedding[0], question_embedding[1]], -1)
+        question_embedding = self.question_dropout(question_embedding)
+
+        return question_embedding
+
+
 class InputUnitVisual(nn.Module):
     def __init__(self, k_max_frame_level, k_max_clip_level, spl_resolution, vision_dim, module_dim=512):
         super(InputUnitVisual, self).__init__()
@@ -209,7 +249,7 @@ class OutputUnitCount(nn.Module):
 
 
 class HCRNNetwork(nn.Module):
-    def __init__(self, vision_dim, module_dim, word_dim, k_max_frame_level, k_max_clip_level, spl_resolution, vocab, question_type):
+    def __init__(self, vision_dim, module_dim, word_dim, k_max_frame_level, k_max_clip_level, spl_resolution, vocab, question_type, bert=False):
         super(HCRNNetwork, self).__init__()
 
         self.question_type = question_type
@@ -217,27 +257,27 @@ class HCRNNetwork(nn.Module):
 
         if self.question_type in ['action', 'transition']:
             encoder_vocab_size = len(vocab['question_answer_token_to_idx'])
-            self.linguistic_input_unit = InputUnitLinguistic(vocab_size=encoder_vocab_size, wordvec_dim=word_dim,
-                                                             module_dim=module_dim, rnn_dim=module_dim)
-            self.visual_input_unit = InputUnitVisual(k_max_frame_level=k_max_frame_level, k_max_clip_level=k_max_clip_level, spl_resolution=spl_resolution, vision_dim=vision_dim, module_dim=module_dim)
             self.output_unit = OutputUnitMultiChoices(module_dim=module_dim)
 
         elif self.question_type == 'count':
             encoder_vocab_size = len(vocab['question_token_to_idx'])
-            self.linguistic_input_unit = InputUnitLinguistic(vocab_size=encoder_vocab_size, wordvec_dim=word_dim,
-                                                             module_dim=module_dim, rnn_dim=module_dim)
-            self.visual_input_unit = InputUnitVisual(k_max_frame_level=k_max_frame_level, k_max_clip_level=k_max_clip_level, spl_resolution=spl_resolution, vision_dim=vision_dim, module_dim=module_dim)
             self.output_unit = OutputUnitCount(module_dim=module_dim)
         else:
             encoder_vocab_size = len(vocab['question_token_to_idx'])
             self.num_classes = len(vocab['answer_token_to_idx'])
-            self.linguistic_input_unit = InputUnitLinguistic(vocab_size=encoder_vocab_size, wordvec_dim=word_dim,
-                                                             module_dim=module_dim, rnn_dim=module_dim)
-            self.visual_input_unit = InputUnitVisual(k_max_frame_level=k_max_frame_level, k_max_clip_level=k_max_clip_level, spl_resolution=spl_resolution, vision_dim=vision_dim, module_dim=module_dim)
             self.output_unit = OutputUnitOpenEnded(num_answers=self.num_classes)
 
+        if not bert:
+            self.linguistic_input_unit = InputUnitLinguistic(vocab_size=encoder_vocab_size, wordvec_dim=word_dim,
+                                                             module_dim=module_dim, rnn_dim=module_dim)
+
+        else:
+            self.linguistic_input_unit = InputUnitLinguisticPrecomputed(wordvec_dim=word_dim, module_dim=module_dim, rnn_dim=module_dim)
+        self.visual_input_unit = InputUnitVisual(k_max_frame_level=k_max_frame_level, k_max_clip_level=k_max_clip_level, spl_resolution=spl_resolution, vision_dim=vision_dim, module_dim=module_dim)
+
         init_modules(self.modules(), w_init="xavier_uniform")
-        nn.init.uniform_(self.linguistic_input_unit.encoder_embed.weight, -1.0, 1.0)
+        if not bert:
+            nn.init.uniform_(self.linguistic_input_unit.encoder_embed.weight, -1.0, 1.0)
 
     def forward(self, ans_candidates, ans_candidates_len, video_appearance_feat, video_motion_feat, question,
                 question_len):

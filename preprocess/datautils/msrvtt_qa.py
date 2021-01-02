@@ -53,9 +53,15 @@ def process_questions(args):
         with open(args.vocab_json.format(args.dataset, args.dataset), 'r') as f:
             vocab = json.load(f)
 
+
     obj = utils.encode_data(vocab, questions, answers, video_ids, video_ids, args.mode, "none", args.glove_pt)
 
     print('Writing', args.output_pt.format(
         args.dataset, args.dataset, args.mode))
     with open(args.output_pt.format(args.dataset, args.dataset, args.mode), 'wb') as f:
         pickle.dump(obj, f)
+
+    if args.bert:
+        outfile = args.output_pt.format(args.dataset, args.dataset, args.mode)
+        outfile = outfile.replace('.pt', '_feat.h5')
+        utils.encode_data_BERT(questions, answers, video_ids, video_ids, args.cuda, args.batch_size, outfile, ans_candidates=None)

@@ -52,6 +52,15 @@ __C.dataset.test_question_pt = '{}_{}_test_questions.pt'
 __C.dataset.save_dir = ''
 __C.dataset = dict(__C.dataset)
 
+#bert
+__C.bert = edict()
+__C.bert.flag=False
+__C.bert.word_dim=768
+__C.bert.train_question_feat = '{}_{}_train_questions_feat.h5'
+__C.bert.val_question_feat = '{}_{}_val_questions_feat.h5'
+__C.bert.test_question_feat = '{}_{}_test_questions_feat.h5'
+__C.bert = dict(__C.bert)
+
 # experiment name
 __C.exp_name = 'defaultExp'
 

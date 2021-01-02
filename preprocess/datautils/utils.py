@@ -3,7 +3,12 @@ import nltk
 from collections import Counter
 
 import pickle
+import h5py
 import numpy as np
+from tqdm import tqdm
+
+import torch
+from transformers import RobertaConfig, RobertaTokenizer, RobertaModel
 
 
 def encode(seq_tokens, token_to_idx, allow_unk=False):
@@ -203,6 +208,42 @@ def encode_data(vocab, questions, answers, video_names, video_ids, mode, questio
         })
 
     return obj
+
+
+def encode_data_BERT(questions, answers, video_names, video_ids, cuda, batch_size, outfile, ans_candidates=None):
+    tokenizer = RobertaTokenizer.from_pretrained("roberta-base")
+    model = RobertaModel.from_pretrained("roberta-base")
+    model.eval()
+    if cuda:
+        model.cuda()
+
+    questions_tokens = tokenizer(questions, return_tensors="pt", padding=True)
+    questions_input_ids = questions_tokens['input_ids']
+    questions_attention_mask = questions_tokens['attention_mask']
+
+    questions_len_bert = questions_attention_mask.sum(1).numpy()
+
+    dataset_size = questions_input_ids.shape[0]
+    T = questions_input_ids.shape[1]
+    F = 768
+
+    with h5py.File(outfile, 'w') as fd:
+        feat_dset = fd.create_dataset('question_features', (dataset_size, T, F), dtype=np.float32)
+        for batch in tqdm(range(len(questions) // batch_size + int(len(questions) % batch_size != 0))):
+            batch_min, batch_max = batch*batch_size, min(len(questions),(batch+1)*batch_size)
+            question_input_ids = questions_input_ids[batch_min:batch_max]
+            question_attention_mask = questions_input_ids[batch_min:batch_max]
+            if cuda:
+                question_input_ids = question_input_ids.cuda()
+                question_attention_mask = question_attention_mask.cuda()
+            with torch.no_grad():
+                question_bert = model(input_ids=question_input_ids, attention_mask=question_attention_mask).last_hidden_state.cpu().numpy()
+            feat_dset[batch_min:batch_max] = question_bert
+        len_dset = fd.create_dataset('question_len', (dataset_size,), dtype=np.int32)
+        len_dset[:] = questions_len_bert
+        video_ids_dset = fd.create_dataset('ids', shape=(dataset_size,), dtype=np.int)
+        video_ids_dset[:] = video_ids
+
 
 # --------------------------------------------------------
 # Fast R-CNN
