@@ -1,4 +1,4 @@
-gpu_id: 3
+gpu_id: 0
 multi_gpus: False
 num_workers: 4
 seed: 666
@@ -11,7 +11,7 @@ train:
   max_epochs: 25
   word_dim: 300
   module_dim: 512
-  glove: True
+  glove: False
   k_max_frame_level: 16
   k_max_clip_level: 8
   spl_resolution: 1
@@ -28,3 +28,8 @@ dataset:
   question_type: 'none'
   data_dir: 'data/msvd-qa'
   save_dir: 'results/'
+
+bert:
+  flag: True
+  word_dim: 768
+  model: "precomputed"
