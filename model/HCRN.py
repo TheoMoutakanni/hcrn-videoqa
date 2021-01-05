@@ -1,7 +1,7 @@
 import numpy as np
 from torch.nn import functional as F
 
-from transformers import AutoModels
+from transformers import AutoModel
 
 from .utils import *
 from .CRN import CRN
@@ -123,7 +123,7 @@ class InputUnitLinguisticTransformers(nn.Module):
         super(InputUnitLinguisticTransformers, self).__init__()
 
         if isinstance(transformer_module, str):
-            self.transformer = AutoModels.from_pretrained(transformer_module)
+            self.transformer = AutoModel.from_pretrained(transformer_module)
         else:
             # Dict means fine tuned model
             model = transformer_module['model']
@@ -153,7 +153,9 @@ class InputUnitLinguisticTransformers(nn.Module):
         return:
             question representation [Tensor] (batch_size, module_dim)
         """
-        questions_embedding = self.transformer(questions_tokens)
+        questions_inputs_ids, questions_attention_mask = questions_tokens
+        output_transformer = self.transformer(input_ids=questions_inputs_ids, attention_mask=questions_attention_mask)
+        questions_embedding = output_transformer.last_hidden_state
         embed = self.tanh(self.embedding_dropout(questions_embedding))
         embed = nn.utils.rnn.pack_padded_sequence(embed, question_len, batch_first=True,
                                                   enforce_sorted=False)
@@ -318,11 +320,11 @@ class HCRNNetwork(nn.Module):
             self.num_classes = len(vocab['answer_token_to_idx'])
             self.output_unit = OutputUnitOpenEnded(num_answers=self.num_classes)
 
-        if bert_model is "none":
+        if bert_model == "none":
             self.linguistic_input_unit = InputUnitLinguistic(vocab_size=encoder_vocab_size, wordvec_dim=word_dim,
                                                              module_dim=module_dim, rnn_dim=module_dim)
 
-        elif bert_model is "precomputed":
+        elif bert_model == "precomputed":
             self.linguistic_input_unit = InputUnitLinguisticPrecomputed(wordvec_dim=word_dim, module_dim=module_dim, rnn_dim=module_dim)
         else:
             self.linguistic_input_unit = InputUnitLinguisticTransformers(transformer_module=bert_model, module_dim=module_dim, rnn_dim=module_dim)
@@ -331,7 +333,7 @@ class HCRNNetwork(nn.Module):
         self.visual_input_unit = InputUnitVisual(k_max_frame_level=k_max_frame_level, k_max_clip_level=k_max_clip_level, spl_resolution=spl_resolution, vision_dim=vision_dim, module_dim=module_dim)
 
         init_modules(self.modules(), w_init="xavier_uniform")
-        if not bert:
+        if bert_model == "none":
             nn.init.uniform_(self.linguistic_input_unit.encoder_embed.weight, -1.0, 1.0)
 
     def forward(self, ans_candidates, ans_candidates_len, video_appearance_feat, video_motion_feat, question,
@@ -347,7 +349,7 @@ class HCRNNetwork(nn.Module):
         return:
             logits.
         """
-        batch_size = question.size(0)
+        batch_size = question_len.size(0)
         if self.question_type in ['frameqa', 'count', 'none']:
             # get image, word, and sentence embeddings
             question_embedding = self.linguistic_input_unit(question, question_len)

@@ -8,7 +8,7 @@ import numpy as np
 from tqdm import tqdm
 
 import torch
-from transformers import RobertaConfig, RobertaTokenizer, RobertaModel
+from transformers import AutoTokenizer, AutoModel
 
 
 def encode(seq_tokens, token_to_idx, allow_unk=False):
@@ -210,9 +210,11 @@ def encode_data(vocab, questions, answers, video_names, video_ids, mode, questio
     return obj
 
 
-def encode_data_BERT(questions, answers, video_names, video_ids, cuda, batch_size, outfile, ans_candidates=None):
-    tokenizer = RobertaTokenizer.from_pretrained("roberta-base")
-    model = RobertaModel.from_pretrained("roberta-base")
+def encode_data_BERT(bert_model, questions, answers, video_names, video_ids, cuda, batch_size, outfile, ans_candidates=None):
+    outfile_h5 = outfile.replace('.pt', '_feat.h5')
+
+    tokenizer = AutoTokenizer.from_pretrained(bert_model)
+    model = AutoModel.from_pretrained(bert_model)
     model.eval()
     if cuda:
         model.cuda()
@@ -227,12 +229,12 @@ def encode_data_BERT(questions, answers, video_names, video_ids, cuda, batch_siz
     T = questions_input_ids.shape[1]
     F = 768
 
-    with h5py.File(outfile, 'w') as fd:
+    with h5py.File(outfile_h5, 'w') as fd:
         feat_dset = fd.create_dataset('question_features', (dataset_size, T, F), dtype=np.float32)
         for batch in tqdm(range(len(questions) // batch_size + int(len(questions) % batch_size != 0))):
             batch_min, batch_max = batch*batch_size, min(len(questions),(batch+1)*batch_size)
             question_input_ids = questions_input_ids[batch_min:batch_max]
-            question_attention_mask = questions_input_ids[batch_min:batch_max]
+            question_attention_mask = questions_attention_mask[batch_min:batch_max]
             if cuda:
                 question_input_ids = question_input_ids.cuda()
                 question_attention_mask = question_attention_mask.cuda()
@@ -243,6 +245,13 @@ def encode_data_BERT(questions, answers, video_names, video_ids, cuda, batch_siz
         len_dset[:] = questions_len_bert
         video_ids_dset = fd.create_dataset('ids', shape=(dataset_size,), dtype=np.int)
         video_ids_dset[:] = video_ids
+
+    with open(outfile, 'rb') as f:
+        obj = pickle.load(f)
+    obj['questions_bert'] = questions_input_ids.numpy()
+    obj['attention_mask'] = questions_attention_mask.numpy()
+    with open(outfile, 'wb') as f:
+        pickle.dump(obj, f)
 
 
 # --------------------------------------------------------

@@ -56,6 +56,7 @@ __C.dataset = dict(__C.dataset)
 __C.bert = edict()
 __C.bert.flag=False
 __C.bert.word_dim=768
+__C.bert.model='precomputed'
 __C.bert.train_question_feat = '{}_{}_train_questions_feat.h5'
 __C.bert.val_question_feat = '{}_{}_val_questions_feat.h5'
 __C.bert.test_question_feat = '{}_{}_test_questions_feat.h5'

@@ -32,8 +32,7 @@ def openeded_encoding_data(args, vocab, questions, video_names, video_ids, answe
 
     if args.bert != "none":
         outfile = args.output_pt.format(args.question_type, args.question_type, mode)
-        outfile = outfile.replace('.pt', '_feat.h5')
-        utils.encode_data_BERT(questions, answers, video_names, video_ids, args.cuda, args.batch_size, outfile, ans_candidates=None)
+        utils.encode_data_BERT(args.bert, questions, answers, video_names, video_ids, args.cuda, args.batch_size, outfile, ans_candidates=None)
 
 def multichoice_encoding_data(args, vocab, questions, video_names, video_ids, answers, ans_candidates, mode='train'):
     obj = utils.encode_data(vocab, questions, answers, video_names, video_ids, mode, args.question_type, args.glove_pt, ans_candidates)

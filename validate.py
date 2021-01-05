@@ -138,6 +138,7 @@ if __name__ == '__main__':
     if cfg.bert.flag:
         if cfg.bert.model == 'precomputed':
             test_loader_kwargs['question_feat'] = cfg.bert.test_question_feat
+        test_loader_kwargs['bert_model'] = cfg.bert.model
     test_loader = VideoQADataLoader(**test_loader_kwargs)
     model_kwargs.update({'vocab': test_loader.vocab})
     model = HCRN.HCRNNetwork(**model_kwargs).to(device)

@@ -44,11 +44,15 @@ class VideoQADataset(Dataset):
 
     def __init__(self, answers, ans_candidates, ans_candidates_len, questions, questions_len, video_ids, q_ids,
                  app_feature_h5, app_feat_id_to_index, motion_feature_h5, motion_feat_id_to_index,
-                 question_feature_h5=None, question_feat_id_to_index=None):
+                 question_feature_h5=None, question_feat_id_to_index=None, attention_mask=None):
         # convert data to tensor
         self.all_answers = answers
         if question_feature_h5 is None:
             self.all_questions = torch.LongTensor(np.asarray(questions))
+        if attention_mask is not None:
+            self.all_attention_mask = torch.LongTensor(np.asarray(attention_mask))
+        else:
+            self.all_attention_mask = None
         self.question_feature_h5 = question_feature_h5
         self.all_questions_len = torch.LongTensor(np.asarray(questions_len))
         self.all_video_ids = torch.LongTensor(np.asarray(video_ids))
@@ -92,6 +96,13 @@ class VideoQADataset(Dataset):
             motion_feat = f_motion['resnext_features'][motion_index]  # (8, 2048)
         appearance_feat = torch.from_numpy(appearance_feat)
         motion_feat = torch.from_numpy(motion_feat)
+
+        if self.all_attention_mask is not None:
+            attention_mask = self.all_attention_mask[index]
+            return (
+                video_idx, question_idx, answer, ans_candidates, ans_candidates_len, appearance_feat, motion_feat, (question, attention_mask),
+                question_len)
+
         return (
             video_idx, question_idx, answer, ans_candidates, ans_candidates_len, appearance_feat, motion_feat, question,
             question_len)
@@ -111,10 +122,14 @@ class VideoQADataLoader(DataLoader):
         print('loading questions from %s' % (question_pt_path))
         question_type = kwargs.pop('question_type')
         questions = None
+        attention_mask = None
         with open(question_pt_path, 'rb') as f:
             obj = pickle.load(f)
-            if 'question_feat' not in kwargs:
+            if 'question_feat' not in kwargs and 'bert_model' not in kwargs:
                 questions = obj['questions']
+            if 'bert_model' in kwargs and kwargs['bert_model'] != 'precomputed':
+                questions = obj['questions_bert']
+                attention_mask = obj['attention_mask']
             questions_len = obj['questions_len']
             video_ids = obj['video_ids']
             q_ids = obj['question_id']
@@ -130,6 +145,7 @@ class VideoQADataLoader(DataLoader):
             if trained_num > 0:
                 if 'question_feat' not in kwargs:
                     questions = questions[:trained_num]
+                attention_mask = attention_mask[:trained_num]
                 questions_len = questions_len[:trained_num]
                 video_ids = video_ids[:trained_num]
                 q_ids = q_ids[:trained_num]
@@ -142,6 +158,7 @@ class VideoQADataLoader(DataLoader):
             if val_num > 0:
                 if 'question_feat' not in kwargs:
                     questions = questions[:val_num]
+                attention_mask = attention_mask[:val_num]
                 questions_len = questions_len[:val_num]
                 video_ids = video_ids[:val_num]
                 q_ids = q_ids[:val_num]
@@ -154,6 +171,7 @@ class VideoQADataLoader(DataLoader):
             if test_num > 0:
                 if 'question_feat' not in kwargs:
                     questions = questions[:test_num]
+                attention_mask = attention_mask[:test_num]
                 questions_len = questions_len[:test_num]
                 video_ids = video_ids[:test_num]
                 q_ids = q_ids[:test_num]
@@ -172,7 +190,7 @@ class VideoQADataLoader(DataLoader):
         motion_feat_id_to_index = {str(id): i for i, id in enumerate(motion_video_ids)}
         self.app_feature_h5 = kwargs.pop('appearance_feat')
         self.motion_feature_h5 = kwargs.pop('motion_feat')
-        if 'question_feat' in kwargs:
+        if 'bert_model' in kwargs and kwargs['bert_model'] == 'precomputed':
             with h5py.File(kwargs['question_feat'], 'r') as question_features_file:
                 question_video_ids = question_features_file['ids'][()]
             question_video_id_to_index = {str(id): i for i, id in enumerate(question_video_ids)}
@@ -180,10 +198,12 @@ class VideoQADataLoader(DataLoader):
         else:
             self.question_feature_h5 = None
             question_video_id_to_index = None
+        kwargs.pop('bert_model')
         self.dataset = VideoQADataset(answers, ans_candidates, ans_candidates_len, questions, questions_len,
                                       video_ids, q_ids,
                                       self.app_feature_h5, app_feat_id_to_index, self.motion_feature_h5,
-                                      motion_feat_id_to_index, self.question_feature_h5, question_video_id_to_index)
+                                      motion_feat_id_to_index, question_feature_h5=self.question_feature_h5,
+                                      question_feat_id_to_index=question_video_id_to_index, attention_mask=attention_mask)
 
         self.vocab = vocab
         self.batch_size = kwargs['batch_size']

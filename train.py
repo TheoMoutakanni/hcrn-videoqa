@@ -40,6 +40,7 @@ def train(cfg):
     if cfg.bert.flag:
         if cfg.bert.model == 'precomputed':
             train_loader_kwargs['question_feat'] = cfg.bert.train_question_feat
+        train_loader_kwargs['bert_model'] = cfg.bert.model
     train_loader = VideoQADataLoader(**train_loader_kwargs)
     logging.info("number of train instances: {}".format(len(train_loader.dataset)))
     if cfg.val.flag:
@@ -57,6 +58,7 @@ def train(cfg):
         if cfg.bert.flag:
             if cfg.bert.model == 'precomputed':
                 val_loader_kwargs['question_feat'] = cfg.bert.val_question_feat
+            val_loader_kwargs['bert_model'] = cfg.bert.model
         val_loader = VideoQADataLoader(**val_loader_kwargs)
         logging.info("number of val instances: {}".format(len(val_loader.dataset)))
 
@@ -73,7 +75,7 @@ def train(cfg):
         'question_type': cfg.dataset.question_type
     }
     if cfg.bert.flag:
-        model_kwargs['bert'] = cfg.bert.model
+        model_kwargs['bert_model'] = cfg.bert.model
         model_kwargs['word_dim'] = cfg.bert.word_dim
     model_kwargs_tosave = {k: v for k, v in model_kwargs.items() if k != 'vocab'}
     model = HCRN.HCRNNetwork(**model_kwargs).to(device)
