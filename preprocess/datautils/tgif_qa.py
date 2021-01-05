@@ -30,7 +30,7 @@ def openeded_encoding_data(args, vocab, questions, video_names, video_ids, answe
     with open(args.output_pt.format(args.question_type, args.question_type, mode), 'wb') as f:
         pickle.dump(obj, f)
 
-    if args.bert:
+    if args.bert != "none":
         outfile = args.output_pt.format(args.question_type, args.question_type, mode)
         outfile = outfile.replace('.pt', '_feat.h5')
         utils.encode_data_BERT(questions, answers, video_names, video_ids, args.cuda, args.batch_size, outfile, ans_candidates=None)

@@ -1,6 +1,8 @@
 import numpy as np
 from torch.nn import functional as F
 
+from transformers import AutoModels
+
 from .utils import *
 from .CRN import CRN
 
@@ -103,6 +105,55 @@ class InputUnitLinguisticPrecomputed(nn.Module):
             question representation [Tensor] (batch_size, module_dim)
         """
         # questions_embedding = self.encoder_fc(questions_embedding)
+        embed = self.tanh(self.embedding_dropout(questions_embedding))
+        embed = nn.utils.rnn.pack_padded_sequence(embed, question_len, batch_first=True,
+                                                  enforce_sorted=False)
+
+        self.encoder.flatten_parameters()
+        _, (question_embedding, _) = self.encoder(embed)
+        if self.bidirectional:
+            question_embedding = torch.cat([question_embedding[0], question_embedding[1]], -1)
+        question_embedding = self.question_dropout(question_embedding)
+
+        return question_embedding
+
+
+class InputUnitLinguisticTransformers(nn.Module):
+    def __init__(self, transformer_module, rnn_dim=512, module_dim=512, bidirectional=True):
+        super(InputUnitLinguisticTransformers, self).__init__()
+
+        if isinstance(transformer_module, str):
+            self.transformer = AutoModels.from_pretrained(transformer_module)
+        else:
+            # Dict means fine tuned model
+            model = transformer_module['model']
+            path = transformer_module['path']
+            self.transformer = AutoModels.from_pretrained(model)
+            ckpt = torch.load(path)
+            self.transformer = self.transformer.load_state_dict(ckpt['state_dict'])
+
+        self.dim = module_dim
+
+        self.bidirectional = bidirectional
+        if bidirectional:
+            rnn_dim = rnn_dim // 2
+
+        self.tanh = nn.Tanh()
+        self.encoder = nn.LSTM(768, rnn_dim, batch_first=True, bidirectional=bidirectional)
+        self.embedding_dropout = nn.Dropout(p=0.15)
+        self.question_dropout = nn.Dropout(p=0.18)
+
+        self.module_dim = module_dim
+
+    def forward(self, questions_tokens, question_len):
+        """
+        Args:
+            questions_embedding: [Tensor] (batch_size, max_question_length, wordvec_dim)
+            question_len: [Tensor] (batch_size)
+        return:
+            question representation [Tensor] (batch_size, module_dim)
+        """
+        questions_embedding = self.transformer(questions_tokens)
         embed = self.tanh(self.embedding_dropout(questions_embedding))
         embed = nn.utils.rnn.pack_padded_sequence(embed, question_len, batch_first=True,
                                                   enforce_sorted=False)
@@ -249,7 +300,7 @@ class OutputUnitCount(nn.Module):
 
 
 class HCRNNetwork(nn.Module):
-    def __init__(self, vision_dim, module_dim, word_dim, k_max_frame_level, k_max_clip_level, spl_resolution, vocab, question_type, bert=False):
+    def __init__(self, vision_dim, module_dim, word_dim, k_max_frame_level, k_max_clip_level, spl_resolution, vocab, question_type, bert_model="none"):
         super(HCRNNetwork, self).__init__()
 
         self.question_type = question_type
@@ -267,12 +318,16 @@ class HCRNNetwork(nn.Module):
             self.num_classes = len(vocab['answer_token_to_idx'])
             self.output_unit = OutputUnitOpenEnded(num_answers=self.num_classes)
 
-        if not bert:
+        if bert_model is "none":
             self.linguistic_input_unit = InputUnitLinguistic(vocab_size=encoder_vocab_size, wordvec_dim=word_dim,
                                                              module_dim=module_dim, rnn_dim=module_dim)
 
-        else:
+        elif bert_model is "precomputed":
             self.linguistic_input_unit = InputUnitLinguisticPrecomputed(wordvec_dim=word_dim, module_dim=module_dim, rnn_dim=module_dim)
+        else:
+            self.linguistic_input_unit = InputUnitLinguisticTransformers(transformer_module=bert_model, module_dim=module_dim, rnn_dim=module_dim)
+
+
         self.visual_input_unit = InputUnitVisual(k_max_frame_level=k_max_frame_level, k_max_clip_level=k_max_clip_level, spl_resolution=spl_resolution, vision_dim=vision_dim, module_dim=module_dim)
 
         init_modules(self.modules(), w_init="xavier_uniform")

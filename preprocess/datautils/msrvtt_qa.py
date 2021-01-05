@@ -61,7 +61,7 @@ def process_questions(args):
     with open(args.output_pt.format(args.dataset, args.dataset, args.mode), 'wb') as f:
         pickle.dump(obj, f)
 
-    if args.bert:
+    if args.bert != "none":
         outfile = args.output_pt.format(args.dataset, args.dataset, args.mode)
         outfile = outfile.replace('.pt', '_feat.h5')
         utils.encode_data_BERT(questions, answers, video_ids, video_ids, args.cuda, args.batch_size, outfile, ans_candidates=None)

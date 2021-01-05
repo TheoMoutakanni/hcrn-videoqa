@@ -17,7 +17,7 @@ if __name__ == '__main__':
     parser.add_argument('--mode', choices=['train', 'val', 'test'])
     parser.add_argument('--question_type', choices=['frameqa', 'action', 'transition', 'count', 'none'], default='none')
     parser.add_argument('--seed', type=int, default=666)
-    parser.add_argument('--bert', action='store_true')
+    parser.add_argument('--bert', type=str, default="none")
     parser.add_argument('--cuda', action='store_true')
     parser.add_argument('--batch_size', type=int, default=128)
 
