@@ -19,8 +19,6 @@ from validate import validate
 
 import model.HCRN as HCRN
 
-from utils import todevice
-
 from config import cfg, cfg_from_file
 
 
@@ -35,7 +33,8 @@ def train(cfg):
         'train_num': cfg.train.train_num,
         'batch_size': cfg.train.batch_size,
         'num_workers': cfg.num_workers,
-        'shuffle': True
+        'shuffle': True,
+        'pin_memory': True
     }
     if cfg.bert.flag:
         if cfg.bert.model == 'precomputed':
@@ -53,7 +52,8 @@ def train(cfg):
             'val_num': cfg.val.val_num,
             'batch_size': cfg.train.batch_size,
             'num_workers': cfg.num_workers,
-            'shuffle': False
+            'shuffle': False,
+            'pin_memory': True
         }
         if cfg.bert.flag:
             if cfg.bert.model == 'precomputed':
@@ -123,69 +123,34 @@ def train(cfg):
         for i, batch in enumerate(iter(train_loader)):
             progress = epoch + i / len(train_loader)
             _, _, answers, *batch_input = [todevice(x, device) for x in batch]
-            answers = answers.cuda().squeeze()
-            batch_size = answers.size(0)
-            optimizer.zero_grad()
-            logits = model(*batch_input)
-            if cfg.dataset.question_type in ['action', 'transition']:
-                batch_agg = np.concatenate(np.tile(np.arange(batch_size).reshape([batch_size, 1]),
-                                                   [1, 5])) * 5  # [0, 0, 0, 0, 0, 5, 5, 5, 5, 1, ...]
-                answers_agg = tile(answers, 0, 5)
-                loss = torch.max(torch.tensor(0.0).cuda(),
-                                 1.0 + logits - logits[answers_agg + torch.from_numpy(batch_agg).cuda()])
-                loss = loss.sum()
-                loss.backward()
-                total_loss += loss.detach()
-                avg_loss = total_loss / (i + 1)
-                nn.utils.clip_grad_norm_(model.parameters(), max_norm=12)
-                optimizer.step()
-                preds = torch.argmax(logits.view(batch_size, 5), dim=1)
-                aggreeings = (preds == answers)
-            elif cfg.dataset.question_type == 'count':
-                answers = answers.unsqueeze(-1)
-                loss = criterion(logits, answers.float())
-                loss.backward()
-                total_loss += loss.detach()
-                avg_loss = total_loss / (i + 1)
-                nn.utils.clip_grad_norm_(model.parameters(), max_norm=12)
-                optimizer.step()
-                preds = (logits + 0.5).long().clamp(min=1, max=10)
-                batch_mse = (preds - answers) ** 2
-            else:
-                loss = criterion(logits, answers)
-                loss.backward()
-                total_loss += loss.detach()
-                avg_loss = total_loss / (i + 1)
-                nn.utils.clip_grad_norm_(model.parameters(), max_norm=12)
-                optimizer.step()
-                aggreeings = batch_accuracy(logits, answers)
-
+            answers = todevice(answers, device).squeeze()
+            loss, metric = train_it(batch_input, answers, model, criterion, optimizer, cfg)
+            total_loss += loss
+            avg_loss = total_loss / (i + 1)
             if cfg.dataset.question_type == 'count':
-                batch_avg_mse = batch_mse.sum().item() / answers.size(0)
-                batch_mse_sum += batch_mse.sum().item()
+                batch_avg_mse = metric / answers.size(0)
+                batch_mse_sum += metric
                 count += answers.size(0)
                 avg_mse = batch_mse_sum / count
                 sys.stdout.write(
                     "\rProgress = {progress}   ce_loss = {ce_loss}   avg_loss = {avg_loss}    train_mse = {train_mse}    avg_mse = {avg_mse}    exp: {exp_name}".format(
                         progress=colored("{:.3f}".format(progress), "green", attrs=['bold']),
-                        ce_loss=colored("{:.4f}".format(loss.item()), "blue", attrs=['bold']),
+                        ce_loss=colored("{:.4f}".format(loss), "blue", attrs=['bold']),
                         avg_loss=colored("{:.4f}".format(avg_loss), "red", attrs=['bold']),
-                        train_mse=colored("{:.4f}".format(batch_avg_mse), "blue",
-                                          attrs=['bold']),
+                        train_mse=colored("{:.4f}".format(batch_avg_mse), "blue", attrs=['bold']),
                         avg_mse=colored("{:.4f}".format(avg_mse), "red", attrs=['bold']),
                         exp_name=cfg.exp_name))
                 sys.stdout.flush()
             else:
-                total_acc += aggreeings.sum().item()
+                total_acc += metric.sum()
                 count += answers.size(0)
                 train_accuracy = total_acc / count
                 sys.stdout.write(
                     "\rProgress = {progress}   ce_loss = {ce_loss}   avg_loss = {avg_loss}    train_acc = {train_acc}    avg_acc = {avg_acc}    exp: {exp_name}".format(
                         progress=colored("{:.3f}".format(progress), "green", attrs=['bold']),
-                        ce_loss=colored("{:.4f}".format(loss.item()), "blue", attrs=['bold']),
+                        ce_loss=colored("{:.4f}".format(loss), "blue", attrs=['bold']),
                         avg_loss=colored("{:.4f}".format(avg_loss), "red", attrs=['bold']),
-                        train_acc=colored("{:.4f}".format(aggreeings.float().mean().cpu().numpy()), "blue",
-                                          attrs=['bold']),
+                        train_acc=colored("{:.4f}".format(metric.mean()), "blue", attrs=['bold']),
                         avg_acc=colored("{:.4f}".format(train_accuracy), "red", attrs=['bold']),
                         exp_name=cfg.exp_name))
                 sys.stdout.flush()
@@ -223,13 +188,51 @@ def train(cfg):
                 valid_acc=colored("{:.4f}".format(valid_acc), "red", attrs=['bold'])))
             sys.stdout.flush()
 
+
+def train_it(batch_input, answers, model, criterion, optimizer, cfg):
+    batch_size = answers.size(0)
+    optimizer.zero_grad()
+    logits = model(*batch_input)
+    if cfg.dataset.question_type in ['action', 'transition']:
+        batch_agg = np.concatenate(np.tile(np.arange(batch_size).reshape([batch_size, 1]),
+                                           [1, 5])) * 5  # [0, 0, 0, 0, 0, 5, 5, 5, 5, 1, ...]
+        answers_agg = tile(answers, 0, 5)
+        loss = torch.max(torch.tensor(0.0).to(answers.device),
+                         1.0 + logits - logits[answers_agg + torch.from_numpy(batch_agg).to(answers.device)])
+        loss = loss.sum()
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), max_norm=12)
+        optimizer.step()
+        preds = torch.argmax(logits.view(batch_size, 5), dim=1)
+        aggreeings = (preds == answers)
+        metric = aggreeings.float().cpu().numpy()
+    elif cfg.dataset.question_type == 'count':
+        answers = answers.unsqueeze(-1)
+        loss = criterion(logits, answers.float())
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), max_norm=12)
+        optimizer.step()
+        preds = (logits + 0.5).long().clamp(min=1, max=10)
+        batch_mse = (preds - answers) ** 2
+        metric = batch_mse.sum().item()
+    else:
+        loss = criterion(logits, answers)
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), max_norm=12)
+        optimizer.step()
+        aggreeings = batch_accuracy(logits, answers)
+        metric = aggreeings.float().cpu().numpy()
+    loss = loss.item()
+    return loss, metric
+
+
 # Credit https://discuss.pytorch.org/t/how-to-tile-a-tensor/13853/4
 def tile(a, dim, n_tile):
     init_dim = a.size(dim)
     repeat_idx = [1] * a.dim()
     repeat_idx[dim] = n_tile
     a = a.repeat(*(repeat_idx))
-    order_index = torch.LongTensor(np.concatenate([init_dim * np.arange(n_tile) + i for i in range(init_dim)])).cuda()
+    order_index = torch.LongTensor(np.concatenate([init_dim * np.arange(n_tile) + i for i in range(init_dim)])).to(a.device)
     return torch.index_select(a, dim, order_index)
 
 

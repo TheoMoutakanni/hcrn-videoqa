@@ -89,6 +89,11 @@ if __name__ == '__main__':
     # check if the data folder exists
     assert os.path.exists(cfg.dataset.data_dir)
 
+    torch.manual_seed(cfg.seed)
+    np.random.seed(cfg.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(cfg.seed)
+
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     cfg.dataset.save_dir = os.path.join(cfg.dataset.save_dir, cfg.exp_name)
     ckpt = os.path.join(cfg.dataset.save_dir, 'ckpt', 'model.pt')
