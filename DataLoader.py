@@ -54,11 +54,14 @@ class VideoQADataset(Dataset):
         else:
             self.all_attention_mask = None
         self.question_feature_h5 = question_feature_h5
+        self.dataset_question_feature = None
         self.all_questions_len = torch.LongTensor(np.asarray(questions_len))
         self.all_video_ids = torch.LongTensor(np.asarray(video_ids))
         self.all_q_ids = q_ids
         self.app_feature_h5 = app_feature_h5
+        self.dataset_app_feature = None
         self.motion_feature_h5 = motion_feature_h5
+        self.dataset_motion_feature = None
         self.app_feat_id_to_index = app_feat_id_to_index
         self.motion_feat_id_to_index = motion_feat_id_to_index
         self.question_feat_id_to_index = question_feat_id_to_index
@@ -86,14 +89,17 @@ class VideoQADataset(Dataset):
             question_len = self.all_questions_len[index]
         else:
             question_index = self.question_feat_id_to_index[str(video_idx)]
-            with h5py.File(self.question_feature_h5, 'r') as f_question:
-                question = f_question['question_features'][question_index]
-                question_len = f_question['question_len'][question_index]
+            if self.dataset_question_feature is None:
+                self.dataset_question_feature = h5py.File(self.question_feature_h5, 'r')
+            question = self.dataset_question_feature['question_features'][question_index]
+            question_len = self.dataset_question_feature['question_len'][question_index]
             question = torch.from_numpy(question)
-        with h5py.File(self.app_feature_h5, 'r') as f_app:
-            appearance_feat = f_app['resnet_features'][app_index]  # (8, 16, 2048)
-        with h5py.File(self.motion_feature_h5, 'r') as f_motion:
-            motion_feat = f_motion['resnext_features'][motion_index]  # (8, 2048)
+        if self.dataset_app_feature is None:
+            self.dataset_app_feature = h5py.File(self.app_feature_h5, 'r')
+        appearance_feat = self.dataset_app_feature['resnet_features'][app_index]  # (8, 16, 2048)
+        if self.dataset_motion_feature is None:
+            self.dataset_motion_feature = h5py.File(self.motion_feature_h5, 'r')
+        motion_feat = self.dataset_motion_feature['resnext_features'][motion_index]  # (8, 2048)
         appearance_feat = torch.from_numpy(appearance_feat)
         motion_feat = torch.from_numpy(motion_feat)
 
