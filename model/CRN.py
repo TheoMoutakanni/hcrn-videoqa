@@ -147,6 +147,7 @@ class CRN(Module):
             start_scale = 1
         else:
             start_scale = 0
+        start_scale = 0 #FORCE
 
         for i in range(min(num_objects, max_subset_size + 1), start_scale, -1):
             self.k_objects_fusion.append(nn.Linear((num_cluster_g + 1) * module_dim, module_dim))
@@ -214,7 +215,7 @@ class CRN(Module):
 
 
 class FasterCRN(Module):
-    def __init__(self, module_dim, num_objects, max_subset_size, gating=False, spl_resolution=1):
+    def __init__(self, module_dim, num_objects, max_subset_size, gating=False, spl_resolution=1, dim=-2):
         super(FasterCRN, self).__init__()
         self.module_dim = module_dim
         self.gating = gating
@@ -226,9 +227,9 @@ class FasterCRN(Module):
         for t in range(spl_resolution):
             self.k_objects_fusion.append(nn.Linear(2*module_dim, module_dim))
             if max_subset_size == 1:
-                self.g_agg.append(LambdaModule(lambda x: torch.mean(x, -2)))
+                self.g_agg.append(LambdaModule(lambda x: torch.mean(x, dim)))
             else:
-                self.g_agg.append(NetRVlad(module_dim, max_subset_size-2, dim=-2, flatten=False))
+                self.g_agg.append(NetRVlad(module_dim, max_subset_size-2, dim=dim, flatten=False))
             if self.gating:
                 self.gate_k_objects_fusion.append(nn.Linear(2*module_dim, module_dim))
         self.p_agg = LambdaModule(lambda x: torch.mean(x, 1))
