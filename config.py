@@ -25,7 +25,9 @@ __C.train.restore = False
 __C.train.glove = True
 __C.train.k_max_frame_level = 16
 __C.train.k_max_clip_level = 8
+__C.train.subvids = 0
 __C.train.spl_resolution = 1
+__C.train.hcrn_model = "basic"
 __C.train = dict(__C.train)
 
 # validation

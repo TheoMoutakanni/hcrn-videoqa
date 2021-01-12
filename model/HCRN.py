@@ -170,10 +170,96 @@ class InputUnitLinguisticTransformers(nn.Module):
 
 
 class InputUnitVisual(nn.Module):
-    def __init__(self, k_max_frame_level, k_max_clip_level, spl_resolution, vision_dim, module_dim=512):
+    def __init__(self, k_max_frame_level, k_max_clip_level, spl_resolution, vision_dim, module_dim=512, subvids=0):
         super(InputUnitVisual, self).__init__()
 
-        self.clip_level_motion_cond = CRN(module_dim, k_max_frame_level, k_max_frame_level, gating=False, spl_resolution=spl_resolution, num_cluster_g=1)
+        self.clip_level_motion_cond = CRN(module_dim, k_max_frame_level, k_max_frame_level, gating=False, spl_resolution=spl_resolution)
+        self.clip_level_question_cond = CRN(module_dim, k_max_frame_level-2, k_max_frame_level-2, gating=True, spl_resolution=spl_resolution)
+        self.video_level_motion_cond = CRN(module_dim, k_max_clip_level, k_max_clip_level, gating=False, spl_resolution=spl_resolution)
+        self.video_level_question_cond = CRN(module_dim, k_max_clip_level-2, k_max_clip_level-2, gating=True, spl_resolution=spl_resolution)
+
+        self.subvids = subvids
+        if subvids > 0:
+            self.subvid_level_motion_cond = CRN(module_dim, 6, 6, gating=False, spl_resolution=spl_resolution)
+            self.subvid_level_question_cond = CRN(module_dim, 6-2, 6-2, gating=True, spl_resolution=spl_resolution)
+            self.subvid_level_motion_proj = nn.Linear(module_dim, module_dim)
+
+        self.sequence_encoder = nn.LSTM(vision_dim, module_dim, batch_first=True, bidirectional=False)
+        self.clip_level_motion_proj = nn.Linear(vision_dim, module_dim)
+        self.video_level_motion_proj = nn.Linear(module_dim, module_dim)
+        self.appearance_feat_proj = nn.Linear(vision_dim, module_dim)
+
+        self.question_embedding_proj = nn.Linear(module_dim, module_dim)
+
+        self.module_dim = module_dim
+        self.activation = nn.ELU()
+
+    def forward(self, appearance_video_feat, motion_video_feat, question_embedding):
+        """
+        Args:
+            appearance_video_feat: [Tensor] (batch_size, num_clips, num_frames, visual_inp_dim)
+            motion_video_feat: [Tensor] (batch_size, num_clips, visual_inp_dim)
+            question_embedding: [Tensor] (batch_size, module_dim)
+        return:
+            encoded video feature: [Tensor] (batch_size, N, module_dim)
+        """
+        batch_size = appearance_video_feat.size(0)
+        clip_level_crn_outputs = []
+        question_embedding_proj = self.question_embedding_proj(question_embedding)
+        for i in range(appearance_video_feat.size(1)):
+            clip_level_motion = motion_video_feat[:, i, :]  # (bz, 2048)
+            clip_level_motion_proj = self.clip_level_motion_proj(clip_level_motion)
+
+            clip_level_appearance = appearance_video_feat[:, i, :, :]  # (bz, 16, 2048)
+            clip_level_appearance_proj = self.appearance_feat_proj(clip_level_appearance)  # (bz, 16, 512)
+            # clip level CRNs
+            clip_level_crn_motion = self.clip_level_motion_cond(torch.unbind(clip_level_appearance_proj, dim=1),
+                                                                clip_level_motion_proj)
+            clip_level_crn_question = self.clip_level_question_cond(clip_level_crn_motion, question_embedding_proj)
+
+            clip_level_crn_output = torch.stack(clip_level_crn_question, dim=1)
+            clip_level_crn_output = clip_level_crn_output.view(batch_size, -1, self.module_dim)
+            clip_level_crn_outputs.append(clip_level_crn_output)
+
+        if self.subvids > 0:
+            # assert len(clip_level_crn_outputs) % self.subvids == 0
+            nb_subvids = len(clip_level_crn_outputs) // self.subvids
+            subvid_level_crn_outputs = []
+            for i in range(nb_subvids):
+                _, (subvid_level_motion, _) = self.sequence_encoder(motion_video_feat[:, i*self.subvids:(i+1)*self.subvids, :])
+                subvid_level_motion = subvid_level_motion.transpose(0, 1)
+                subvid_level_motion_feat_proj = self.subvid_level_motion_proj(subvid_level_motion)
+
+                subvid_level_crn_motion = self.subvid_level_motion_cond(clip_level_crn_outputs[i*self.subvids:(i+1)*self.subvids],
+                                                                        subvid_level_motion_feat_proj)
+                subvid_level_crn_question = self.subvid_level_question_cond(subvid_level_crn_motion, question_embedding_proj)
+                subvid_level_crn_output = torch.stack(subvid_level_crn_question, dim=1)
+                subvid_level_crn_output = subvid_level_crn_output.view(batch_size, -1, self.module_dim)
+                subvid_level_crn_outputs.append(subvid_level_crn_output)
+
+            next_level_inputs = subvid_level_crn_outputs
+        else:
+            next_level_inputs = clip_level_crn_outputs
+
+        # Encode video level motion
+        _, (video_level_motion, _) = self.sequence_encoder(motion_video_feat)
+        video_level_motion = video_level_motion.transpose(0, 1)
+        video_level_motion_feat_proj = self.video_level_motion_proj(video_level_motion)
+        # video level CRNs
+        video_level_crn_motion = self.video_level_motion_cond(next_level_inputs, video_level_motion_feat_proj)
+        video_level_crn_question = self.video_level_question_cond(video_level_crn_motion, question_embedding_proj.unsqueeze(1))
+
+        video_level_crn_output = torch.stack(video_level_crn_question, dim=1)
+        video_level_crn_output = video_level_crn_output.view(batch_size, -1, self.module_dim)
+
+        return video_level_crn_output
+
+
+class FastInputUnitVisual(nn.Module):
+    def __init__(self, k_max_frame_level, k_max_clip_level, spl_resolution, vision_dim, module_dim=512, subvids=0):
+        super(FastInputUnitVisual, self).__init__()
+
+        self.clip_level_motion_cond = CRN(module_dim, k_max_frame_level, k_max_frame_level, gating=False, spl_resolution=spl_resolution)
         self.clip_level_question_cond = CRN(module_dim, k_max_frame_level-2, k_max_frame_level-2, gating=True, spl_resolution=spl_resolution)
         self.video_level_motion_cond = CRN(module_dim, k_max_clip_level, k_max_clip_level, gating=False, spl_resolution=spl_resolution)
         self.video_level_question_cond = CRN(module_dim, k_max_clip_level-2, k_max_clip_level-2, gating=True, spl_resolution=spl_resolution)
@@ -202,7 +288,7 @@ class InputUnitVisual(nn.Module):
         question_embedding_proj = self.question_embedding_proj(question_embedding)
         motion_proj = self.clip_level_motion_proj(motion_video_feat)
         appearance_proj = torch.unbind(self.appearance_feat_proj(appearance_video_feat), dim=2)
-
+        
         # clip level CRNs
         crn_motion = self.clip_level_motion_cond(appearance_proj, motion_proj)
         crn_question = self.clip_level_question_cond(crn_motion, question_embedding_proj)
@@ -213,7 +299,6 @@ class InputUnitVisual(nn.Module):
         _, (video_level_motion, _) = self.sequence_encoder(motion_video_feat)
         video_level_motion = video_level_motion.transpose(0, 1)
         video_level_motion_feat_proj = self.video_level_motion_proj(video_level_motion)
-
         # video level CRNs
         video_level_crn_motion = self.video_level_motion_cond(clip_level_crn_outputs, video_level_motion_feat_proj)
         video_level_crn_question = self.video_level_question_cond(video_level_crn_motion, question_embedding_proj.unsqueeze(1))
@@ -225,13 +310,13 @@ class InputUnitVisual(nn.Module):
 
 
 class FasterInputUnitVisual(nn.Module):
-    def __init__(self, k_max_frame_level, k_max_clip_level, spl_resolution, vision_dim, module_dim=512):
+    def __init__(self, k_max_frame_level, k_max_clip_level, spl_resolution, vision_dim, module_dim=512, subvids=0):
         super(FasterInputUnitVisual, self).__init__()
 
         self.clip_level_motion_cond = FasterCRN(module_dim, k_max_frame_level, k_max_frame_level, gating=False, spl_resolution=spl_resolution)
-        self.clip_level_question_cond = FasterCRN(module_dim, k_max_frame_level-2, k_max_frame_level-2, gating=True, spl_resolution=spl_resolution)
+        self.clip_level_question_cond = FasterCRN(module_dim, k_max_frame_level, k_max_frame_level, gating=True, spl_resolution=spl_resolution) #-2
         self.video_level_motion_cond = FasterCRN(module_dim, k_max_clip_level, k_max_clip_level, gating=False, spl_resolution=spl_resolution)
-        self.video_level_question_cond = FasterCRN(module_dim, k_max_clip_level-2, k_max_clip_level-2, gating=True, spl_resolution=spl_resolution)
+        self.video_level_question_cond = FasterCRN(module_dim, k_max_clip_level, k_max_clip_level, gating=True, spl_resolution=spl_resolution) #-2
 
         self.sequence_encoder = nn.LSTM(vision_dim, module_dim, batch_first=True, bidirectional=False)
         self.clip_level_motion_proj = nn.Linear(vision_dim, module_dim)
@@ -346,7 +431,7 @@ class OutputUnitCount(nn.Module):
 
 
 class HCRNNetwork(nn.Module):
-    def __init__(self, vision_dim, module_dim, word_dim, k_max_frame_level, k_max_clip_level, spl_resolution, vocab, question_type, bert_model="none"):
+    def __init__(self, vision_dim, module_dim, word_dim, k_max_frame_level, k_max_clip_level, spl_resolution, vocab, question_type, hcrn_model="basic", bert_model="none", subvids=0):
         super(HCRNNetwork, self).__init__()
 
         self.question_type = question_type
@@ -362,7 +447,7 @@ class HCRNNetwork(nn.Module):
         else:
             encoder_vocab_size = len(vocab['question_token_to_idx'])
             self.num_classes = len(vocab['answer_token_to_idx'])
-            self.output_unit = OutputUnitOpenEnded(num_answers=self.num_classes)
+            self.output_unit = OutputUnitOpenEnded(module_dim=module_dim, num_answers=self.num_classes)
 
         if bert_model == "none":
             self.linguistic_input_unit = InputUnitLinguistic(vocab_size=encoder_vocab_size, wordvec_dim=word_dim,
@@ -373,8 +458,13 @@ class HCRNNetwork(nn.Module):
         else:
             self.linguistic_input_unit = InputUnitLinguisticTransformers(transformer_module=bert_model, module_dim=module_dim, rnn_dim=module_dim)
 
-
-        self.visual_input_unit = FasterInputUnitVisual(k_max_frame_level=k_max_frame_level, k_max_clip_level=k_max_clip_level, spl_resolution=spl_resolution, vision_dim=vision_dim, module_dim=module_dim)
+        if hcrn_model == "faster":
+            self.visual_input_unit = FasterInputUnitVisual(k_max_frame_level=k_max_frame_level, k_max_clip_level=k_max_clip_level, spl_resolution=spl_resolution, vision_dim=vision_dim, module_dim=module_dim, subvids=subvids)
+        elif hcrn_model == "fast":
+            self.visual_input_unit = FastInputUnitVisual(k_max_frame_level=k_max_frame_level, k_max_clip_level=k_max_clip_level, spl_resolution=spl_resolution, vision_dim=vision_dim, module_dim=module_dim, subvids=subvids)
+        else:
+            # Normal/basic model
+            self.visual_input_unit = InputUnitVisual(k_max_frame_level=k_max_frame_level, k_max_clip_level=k_max_clip_level, spl_resolution=spl_resolution, vision_dim=vision_dim, module_dim=module_dim, subvids=subvids)
 
         init_modules(self.modules(), w_init="xavier_uniform")
         if bert_model == "none":

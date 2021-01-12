@@ -1,6 +1,6 @@
 gpu_id: 0
 multi_gpus: False
-num_workers: 4
+num_workers: 8
 seed: 666
 exp_name: 'expMSRVTT-QA'
 
@@ -8,14 +8,16 @@ train:
   lr: 0.0001
   batch_size: 32
   restore: False
-  max_epochs: 25
+  max_epochs: 10
   word_dim: 300
   module_dim: 512
+  vision_dim: 2048
   glove: True
   k_max_frame_level: 16
   k_max_clip_level: 8
+  subvids: 4
   spl_resolution: 1
-
+  hcrn_model: "basic"
 
 val:
   flag: True
@@ -33,3 +35,4 @@ dataset:
 bert:
   flag: False
   word_dim: 768
+  model: "roberta-base"

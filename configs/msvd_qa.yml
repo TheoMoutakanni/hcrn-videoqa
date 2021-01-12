@@ -1,20 +1,21 @@
 gpu_id: 0
 multi_gpus: False
-num_workers: 4
+num_workers: 8
 seed: 666
 exp_name: 'expMSVD-QA'
 
 train:
   lr: 0.0001
-  batch_size: 32
+  batch_size: 128
   restore: False
-  max_epochs: 25
+  max_epochs: 10
   word_dim: 300
   module_dim: 512
   glove: True
-  k_max_frame_level: 16
-  k_max_clip_level: 8
+  k_max_frame_level: 8
+  k_max_clip_level: 4
   spl_resolution: 1
+  hcrn_model: "faster"
 
 val:
   flag: True

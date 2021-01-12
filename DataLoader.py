@@ -90,15 +90,15 @@ class VideoQADataset(Dataset):
         else:
             question_index = self.question_feat_id_to_index[str(video_idx)]
             if self.dataset_question_feature is None:
-                self.dataset_question_feature = h5py.File(self.question_feature_h5, 'r')
+                self.dataset_question_feature = h5py.File(self.question_feature_h5, 'r') # , rdcc_nbytes=10 * (1024 ** 2), rdcc_nslots=5000, rdcc_w0=1)
             question = self.dataset_question_feature['question_features'][question_index]
             question_len = self.dataset_question_feature['question_len'][question_index]
             question = torch.from_numpy(question)
         if self.dataset_app_feature is None:
-            self.dataset_app_feature = h5py.File(self.app_feature_h5, 'r')
+            self.dataset_app_feature = h5py.File(self.app_feature_h5, 'r') # , rdcc_nbytes=10 * (1024 ** 2), rdcc_nslots=5000, rdcc_w0=1)
         appearance_feat = self.dataset_app_feature['resnet_features'][app_index]  # (8, 16, 2048)
         if self.dataset_motion_feature is None:
-            self.dataset_motion_feature = h5py.File(self.motion_feature_h5, 'r')
+            self.dataset_motion_feature = h5py.File(self.motion_feature_h5, 'r') #, rdcc_nbytes=10 * (1024 ** 2), rdcc_nslots=5000, rdcc_w0=1)
         motion_feat = self.dataset_motion_feature['resnext_features'][motion_index]  # (8, 2048)
         appearance_feat = torch.from_numpy(appearance_feat)
         motion_feat = torch.from_numpy(motion_feat)

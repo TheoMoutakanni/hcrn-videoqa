@@ -34,7 +34,7 @@ def train(cfg):
         'batch_size': cfg.train.batch_size,
         'num_workers': cfg.num_workers,
         'shuffle': True,
-        'pin_memory': True
+        # 'pin_memory': True
     }
     if cfg.bert.flag:
         if cfg.bert.model == 'precomputed':
@@ -53,7 +53,7 @@ def train(cfg):
             'batch_size': cfg.train.batch_size,
             'num_workers': cfg.num_workers,
             'shuffle': False,
-            'pin_memory': True
+            # 'pin_memory': True
         }
         if cfg.bert.flag:
             if cfg.bert.model == 'precomputed':
@@ -72,7 +72,9 @@ def train(cfg):
         'k_max_clip_level': cfg.train.k_max_clip_level,
         'spl_resolution': cfg.train.spl_resolution,
         'vocab': train_loader.vocab,
-        'question_type': cfg.dataset.question_type
+        'question_type': cfg.dataset.question_type,
+        'hcrn_model': cfg.train.hcrn_model,
+        'subvids': cfg.train.subvids,
     }
     if cfg.bert.flag:
         model_kwargs['bert_model'] = cfg.bert.model
@@ -105,6 +107,7 @@ def train(cfg):
         ckpt = os.path.join(cfg.dataset.save_dir, 'ckpt', 'model.pt')
         ckpt = torch.load(ckpt, map_location=lambda storage, loc: storage)
         start_epoch = ckpt['epoch'] + 1
+        #best_val = ckpt['best_val']
         model.load_state_dict(ckpt['state_dict'])
         optimizer.load_state_dict(ckpt['optimizer'])
     if cfg.dataset.question_type in ['frameqa', 'none']:
@@ -179,7 +182,7 @@ def train(cfg):
                     os.makedirs(ckpt_dir)
                 else:
                     assert os.path.isdir(ckpt_dir)
-                save_checkpoint(epoch, model, optimizer, model_kwargs_tosave, os.path.join(ckpt_dir, 'model.pt'))
+                save_checkpoint(epoch, model, optimizer, model_kwargs_tosave, os.path.join(ckpt_dir, 'model.pt'), best_val)
                 sys.stdout.write('\n >>>>>> save to %s <<<<<< \n' % (ckpt_dir))
                 sys.stdout.flush()
 
@@ -254,12 +257,13 @@ def batch_accuracy(predicted, true):
     return agreeing
 
 
-def save_checkpoint(epoch, model, optimizer, model_kwargs, filename):
+def save_checkpoint(epoch, model, optimizer, model_kwargs, filename, best_val):
     state = {
         'epoch': epoch,
         'state_dict': model.state_dict(),
         'optimizer': optimizer.state_dict(),
         'model_kwargs': model_kwargs,
+        'best_val': best_val,
     }
     time.sleep(10)
     torch.save(state, filename)
@@ -278,7 +282,7 @@ def main():
     assert os.path.exists(cfg.dataset.data_dir)
     # check if k_max is set correctly
     assert cfg.train.k_max_frame_level <= 16
-    assert cfg.train.k_max_clip_level <= 8
+    # assert cfg.train.k_max_clip_level <= 8
 
     # check if bert and glove are not set in the same cfg
     assert not (cfg.train.glove and cfg.bert.flag)

@@ -19,6 +19,22 @@ def _moveaxis(tensor: torch.Tensor, source: int, destination: int) -> torch.Tens
     return tensor.permute(*perm)
 
 
+def repeat_as(x, y):
+    if x.shape[:-1] == y.shape[:-1]:
+        return x
+    if len(x.shape) == len(y.shape):
+        dim = np.where(np.array(x.shape[:-1])!=np.array(y.shape[:-1]))[0][0]
+        return x.repeat(*(1 if i!= dim else y.size(dim) for i in range(len(y.shape))))
+    i = len(x.shape) - 1
+    while len(x.shape) < len(y.shape):
+        x = einops.repeat(x, '... i -> ... k i', k=y.size(i))
+        i += 1
+
+    if x.shape[:-1] != y.shape[:-1]:
+        x = repeat_as(x, y)
+    return x
+
+
 class LambdaModule(nn.Module):
     def __init__(self, fun):
         super().__init__()
@@ -53,16 +69,18 @@ class NetVlad(nn.Module):
 
 
 class FVNet(nn.Module):
-    def __init__(self, input_size, cluster_size):
+    def __init__(self, input_size, nb_cluster, dim=1, flatten=True):
         super().__init__()
-        self.assignement_fc = nn.Linear(input_size, cluster_size)
-        self.mu = nn.Parameter(torch.rand(input_size, cluster_size))
-        self.sigma = nn.Parameter(torch.rand(input_size, cluster_size))
+        self.nb_cluster = nb_cluster
+        self.assignement_fc = nn.Linear(input_size, nb_cluster)
+        self.mu = nn.Parameter(torch.rand(input_size, nb_cluster))
+        self.sigma = nn.Parameter(torch.rand(input_size, nb_cluster))
 
     def forward(self, x):
-        batch, feat, num = x.shape
-        x = x.permute(0, 2, 1)
-        a = torch.softmax(self.assignement_fc(x), 2).unsqueeze(2)
+        feat = x.shape[-1]
+        # batch, ... , num, feat
+        x = _moveaxis(x, self.dim, -2)
+        a = torch.softmax(self.assignement_fc(x), dim=-1)
 
         mu = self.mu.expand(batch, num, -1, -1)
         sigma = self.sigma.expand(batch, num, -1, -1)
@@ -99,9 +117,10 @@ class NetRVlad(nn.Module):
         # batch, ... , num, clust
         a = torch.softmax(self.assignement_fc(x), dim=-1)
         # batch, ..., num, clust, feat
-        a_x = torch.einsum('...j,...k->...jk', a, x)
+        a_x = torch.einsum('...ij,...ik->...jk', a, x)
         # batch, ... , clust, feat
-        x = a_x.sum(-3) / a.sum(-2).unsqueeze(-1)
+        x = a_x / a.sum(-2).unsqueeze(-1)
+        #x = a_x.sum(-3) / a.sum(-2).unsqueeze(-1)
         if self.flatten:
             x = x.view(*x.shape[:-2], self.nb_cluster*feat)
 
@@ -123,7 +142,13 @@ class CRN(Module):
             pooling_p = NetRVlad(module_dim, num_cluster_p)
         if self.gating:
             self.gate_k_objects_fusion = nn.ModuleList()
-        for i in range(min(num_objects, max_subset_size + 1), 1, -1):
+
+        if len(range(num_objects, 1, -1)) > 1 and self.max_subset_size == num_objects:
+            start_scale = 1
+        else:
+            start_scale = 0
+
+        for i in range(min(num_objects, max_subset_size + 1), start_scale, -1):
             self.k_objects_fusion.append(nn.Linear((num_cluster_g + 1) * module_dim, module_dim))
             if num_cluster_g == 1:
                 self.g_agg.append(LambdaModule(lambda x: torch.mean(x, 1)))
@@ -159,6 +184,7 @@ class CRN(Module):
             start_scale = 1
         else:
             start_scale = 0
+
         for scaleID in range(start_scale, min(len(scales), self.max_subset_size)):
             idx_relations_randomsample = np.random.choice(len(relations_scales[scaleID]),
                                                           subsample_scales[scaleID], replace=False)
@@ -183,18 +209,8 @@ class CRN(Module):
         return list(itertools.combinations([i for i in range(num_objects)], num_object_relation))
 
     def cat_cond_feat(self, g_feat, cond_feat):
-        if len(g_feat.size()) == 2:
-            h_feat = torch.cat((g_feat, cond_feat), dim=-1)
-        elif len(g_feat.size()) == 3:
-            if len(cond_feat.size()) == 3 and cond_feat.size(1) == g_feat.size(1):
-                h_feat = torch.cat((g_feat, cond_feat), dim=-1)
-            elif len(cond_feat.size()) == 2:
-                cond_feat_repeat = cond_feat.unsqueeze(1).repeat(1, g_feat.size(1), 1)
-                h_feat = torch.cat((g_feat, cond_feat_repeat), dim=-1)
-            else:
-                cond_feat_repeat = cond_feat.repeat(1, g_feat.size(1), 1)
-                h_feat = torch.cat((g_feat, cond_feat_repeat), dim=-1)
-        return h_feat
+        cond_feat_repeat = repeat_as(cond_feat, g_feat)
+        return torch.cat((g_feat, cond_feat_repeat), dim=-1)
 
 
 class FasterCRN(Module):
@@ -226,7 +242,6 @@ class FasterCRN(Module):
         :param cond_feat: conditioning feature
         :return: list of output objects
         """
-        
         features = []
         for t in range(self.spl_resolution):
             g_feat = self.g_agg[t](object_list) # (batch, ..., max_subset_size, feat)
@@ -245,19 +260,3 @@ class FasterCRN(Module):
     def cat_cond_feat(self, g_feat, cond_feat):
         cond_feat_repeat = repeat_as(cond_feat, g_feat)
         return torch.cat((g_feat, cond_feat_repeat), dim=-1)
-
-
-def repeat_as(x, y):
-    if x.shape[:-1] == y.shape[:-1]:
-        return x
-    if len(x.shape) == len(y.shape):
-        dim = np.where(np.array(x.shape[:-1])!=np.array(y.shape[:-1]))[0][0]
-        return x.repeat(*(1 if i!= dim else y.size(dim) for i in range(len(y.shape))))
-    i = len(x.shape) - 1
-    while len(x.shape) < len(y.shape):
-        x = einops.repeat(x, '... i -> ... k i', k=y.size(i))
-        i += 1
-
-    if x.shape[:-1] != y.shape[:-1]:
-        x = repeat_as(x, y)
-    return x
