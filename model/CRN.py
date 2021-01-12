@@ -143,7 +143,7 @@ class CRN(Module):
         if self.gating:
             self.gate_k_objects_fusion = nn.ModuleList()
 
-        if len(range(num_objects, 1, -1)) > 1 and self.max_subset_size == num_objects:
+        if len(range(num_objects, 1, -1)) > 1 and max_subset_size == num_objects:
             start_scale = 1
         else:
             start_scale = 0
