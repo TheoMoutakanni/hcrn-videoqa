@@ -32,7 +32,7 @@ def load_video_paths(args):
 
 
 def create_name2ids(args, force=False):
-    if os.path.isfile(args.name2ids_pt.format(args.dataset, args.mode)) and not force:
+    if os.path.isfile(args.name2ids_pt.format(args.dataset)) and not force:
         return
 
     modes = ['train', 'val', 'test']
@@ -48,7 +48,7 @@ def create_name2ids(args, force=False):
         name2ids[name] = i
         i += 1
 
-    with open(args.name2ids_pt.format(args.dataset, args.mode), 'wb') as handle:
+    with open(args.name2ids_pt.format(args.dataset), 'wb') as handle:
         pickle.dump(name2ids, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
@@ -63,7 +63,7 @@ def process_questions(args):
     for q, a in zip(questions_dict, answers_dict):
         assert q['question_id'] == a['question_id']
 
-    with open(args.name2ids_pt.format(args.dataset, args.mode), 'rb') as handle:
+    with open(args.name2ids_pt.format(args.dataset), 'rb') as handle:
         name2ids = pickle.load(handle)
 
     questions = [d['question'] for d in questions_dict]

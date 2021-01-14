@@ -51,7 +51,7 @@ if __name__ == '__main__':
         msvd_qa.process_questions(args)
     elif args.dataset == 'activitynet-qa':
         args.annotation_file = '/mnt/285EDDF95EDDC02C/Users/Public/Documents/VideoDatasets/ACTIVITYNET-QA/{}_{}.json'
-        args.name2ids_pt = 'data/{}/{}_name2ids.pt'
+        args.name2ids_pt = 'data/{}/name2ids.pt'
         activitynet_qa.create_name2ids(args)
 
         args.question_file = args.annotation_file.format(args.mode, 'q')

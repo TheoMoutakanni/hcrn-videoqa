@@ -79,7 +79,7 @@ class InputUnitLinguistic(nn.Module):
 
 
 class InputUnitLinguisticPrecomputed(nn.Module):
-    def __init__(self, wordvec_dim=768, rnn_dim=512, module_dim=512, bidirectional=True):
+    def __init__(self, use_only_CLS=False, wordvec_dim=768, rnn_dim=512, module_dim=512, bidirectional=True):
         super(InputUnitLinguisticPrecomputed, self).__init__()
 
         self.dim = module_dim
@@ -88,11 +88,15 @@ class InputUnitLinguisticPrecomputed(nn.Module):
         if bidirectional:
             rnn_dim = rnn_dim // 2
 
-        self.encoder_fc = nn.Linear(wordvec_dim, wordvec_dim)
+        self.use_only_CLS = use_only_CLS
+
         self.tanh = nn.Tanh()
-        self.encoder = nn.LSTM(wordvec_dim, rnn_dim, batch_first=True, bidirectional=bidirectional)
         self.embedding_dropout = nn.Dropout(p=0.15)
-        self.question_dropout = nn.Dropout(p=0.18)
+        if self.use_only_CLS:
+            self.encoder_fc = nn.Linear(wordvec_dim, module_dim)
+        else:
+            self.encoder = nn.LSTM(wordvec_dim, rnn_dim, batch_first=True, bidirectional=bidirectional)
+            self.question_dropout = nn.Dropout(p=0.18)
 
         self.module_dim = module_dim
 
@@ -104,16 +108,20 @@ class InputUnitLinguisticPrecomputed(nn.Module):
         return:
             question representation [Tensor] (batch_size, module_dim)
         """
-        # questions_embedding = self.encoder_fc(questions_embedding)
-        embed = self.tanh(self.embedding_dropout(questions_embedding))
-        embed = nn.utils.rnn.pack_padded_sequence(embed, question_len, batch_first=True,
-                                                  enforce_sorted=False)
+        if self.use_only_CLS:
+            question_embedding = self.encoder_fc(questions_embedding[:,0,:])
 
-        self.encoder.flatten_parameters()
-        _, (question_embedding, _) = self.encoder(embed)
-        if self.bidirectional:
-            question_embedding = torch.cat([question_embedding[0], question_embedding[1]], -1)
-        question_embedding = self.question_dropout(question_embedding)
+        question_embedding = self.tanh(self.embedding_dropout(question_embedding))
+
+        if not self.use_only_CLS:
+            embed = nn.utils.rnn.pack_padded_sequence(question_embedding, question_len, batch_first=True,
+                                                      enforce_sorted=False)
+
+            self.encoder.flatten_parameters()
+            _, (question_embedding, _) = self.encoder(embed)
+            if self.bidirectional:
+                question_embedding = torch.cat([question_embedding[0], question_embedding[1]], -1)
+            question_embedding = self.question_dropout(question_embedding)
 
         return question_embedding
 
@@ -501,9 +509,8 @@ class HCRNNetwork(nn.Module):
         if bert_model == "none":
             self.linguistic_input_unit = InputUnitLinguistic(vocab_size=encoder_vocab_size, wordvec_dim=word_dim,
                                                              module_dim=module_dim, rnn_dim=module_dim)
-
-        elif bert_model == "precomputed":
-            self.linguistic_input_unit = InputUnitLinguisticPrecomputed(wordvec_dim=word_dim, module_dim=module_dim, rnn_dim=module_dim)
+        elif 'precomputed' in bert_model:
+            self.linguistic_input_unit = InputUnitLinguisticPrecomputed(use_only_CLS='CLS' in bert_model, wordvec_dim=word_dim, module_dim=module_dim, rnn_dim=module_dim)
         else:
             self.linguistic_input_unit = InputUnitLinguisticTransformers(transformer_module=bert_model, module_dim=module_dim, rnn_dim=module_dim)
 
