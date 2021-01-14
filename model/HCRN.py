@@ -155,7 +155,7 @@ class InputUnitLinguisticTransformers(nn.Module):
         """
         questions_inputs_ids, questions_attention_mask = questions_tokens
         output_transformer = self.transformer(input_ids=questions_inputs_ids, attention_mask=questions_attention_mask)
-        questions_embedding = output_transformer.last_hidden_state
+        questions_embedding = output_transformer[0]
         embed = self.tanh(self.embedding_dropout(questions_embedding))
         embed = nn.utils.rnn.pack_padded_sequence(embed, question_len, batch_first=True,
                                                   enforce_sorted=False)

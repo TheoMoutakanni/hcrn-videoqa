@@ -196,6 +196,8 @@ class VideoQADataLoader(DataLoader):
         motion_feat_id_to_index = {str(id): i for i, id in enumerate(motion_video_ids)}
         self.app_feature_h5 = kwargs.pop('appearance_feat')
         self.motion_feature_h5 = kwargs.pop('motion_feat')
+        self.question_feature_h5 = None
+        question_video_id_to_index = None
         if 'bert_model' in kwargs:
             if kwargs['bert_model'] == 'precomputed':
                 with h5py.File(kwargs['question_feat'], 'r') as question_features_file:
@@ -203,9 +205,7 @@ class VideoQADataLoader(DataLoader):
                 question_video_id_to_index = {str(id): i for i, id in enumerate(question_video_ids)}
                 self.question_feature_h5 = kwargs.pop('question_feat')
             kwargs.pop('bert_model')
-        else:
-            self.question_feature_h5 = None
-            question_video_id_to_index = None
+            
 
         self.dataset = VideoQADataset(answers, ans_candidates, ans_candidates_len, questions, questions_len,
                                       video_ids, q_ids,

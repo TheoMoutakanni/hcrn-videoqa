@@ -46,19 +46,28 @@ class LambdaModule(nn.Module):
 
 
 class NetVlad(nn.Module):
-    def __init__(self, input_size, cluster_size):
+    def __init__(self, input_size, nb_cluster, dim=1, flatten=True):
         super().__init__()
-        self.assignement_fc = nn.Linear(input_size, cluster_size)
-        self.mu = nn.Parameter(torch.rand(cluster_size, input_size),
+        self.assignement_fc = nn.Linear(input_size, nb_cluster)
+        self.mu = nn.Parameter(torch.rand(nb_cluster, input_size),
                                requires_grad=True)
-        self.cluster_size = cluster_size
+        self.nb_cluster = nb_cluster
+        self.dim = dim
+        self.flatten = flatten
 
     def forward(self, x):
-        batch, feat, num = x.shape
-        x = x.permute(0, 2, 1)
-        a = torch.softmax(self.assignement_fc(x), 2).unsqueeze(2)
-
-        mu = self.mu.expand(batch, num, -1, -1)
+        feat = x.shape[-1]
+        # batch, ... , num, feat
+        x = _moveaxis(x, self.dim, -2)
+        # batch, ... , num, clust
+        a = torch.softmax(self.assignement_fc(x), dim=-1)
+        # batch, ..., num, clust, feat
+        vlad = torch.einsum('...j,...k->...jk', a, x-self.mu)
+        # batch, ... , clust, feat
+        x = a_x / a.sum(-2).unsqueeze(-1)
+        #x = a_x.sum(-3) / a.sum(-2).unsqueeze(-1)
+        if self.flatten:
+            x = x.view(*x.shape[:-2], self.nb_cluster*feat)
         vlad = (a * (x.unsqueeze(3) - mu)).sum(1)
 
         vlad = F.normalize(vlad, p=2, dim=2)
@@ -116,7 +125,7 @@ class NetRVlad(nn.Module):
         x = _moveaxis(x, self.dim, -2)
         # batch, ... , num, clust
         a = torch.softmax(self.assignement_fc(x), dim=-1)
-        # batch, ..., num, clust, feat
+        # batch, ..., clust, feat
         a_x = torch.einsum('...ij,...ik->...jk', a, x)
         # batch, ... , clust, feat
         x = a_x / a.sum(-2).unsqueeze(-1)
@@ -220,16 +229,18 @@ class FasterCRN(Module):
         self.module_dim = module_dim
         self.gating = gating
 
+        self.num_cluster = max_subset_size
+
         self.k_objects_fusion = nn.ModuleList()
         self.g_agg = nn.ModuleList()
         if self.gating:
             self.gate_k_objects_fusion = nn.ModuleList()
         for t in range(spl_resolution):
             self.k_objects_fusion.append(nn.Linear(2*module_dim, module_dim))
-            if max_subset_size == 1:
+            if self.num_cluster == 1:
                 self.g_agg.append(LambdaModule(lambda x: torch.mean(x, dim)))
             else:
-                self.g_agg.append(NetRVlad(module_dim, max_subset_size-2, dim=dim, flatten=False))
+                self.g_agg.append(NetRVlad(module_dim, self.num_cluster, dim=dim, flatten=False))
             if self.gating:
                 self.gate_k_objects_fusion.append(nn.Linear(2*module_dim, module_dim))
         self.p_agg = LambdaModule(lambda x: torch.mean(x, 1))
@@ -245,7 +256,7 @@ class FasterCRN(Module):
         """
         features = []
         for t in range(self.spl_resolution):
-            g_feat = self.g_agg[t](object_list) # (batch, ..., max_subset_size, feat)
+            g_feat = self.g_agg[t](object_list) # (batch, ..., num_cluster, feat)
             h_feat = self.cat_cond_feat(g_feat, cond_feat)
             if self.gating:
                 h_feat = self.activation(self.k_objects_fusion[t](h_feat)) * torch.sigmoid(
@@ -254,8 +265,8 @@ class FasterCRN(Module):
                 h_feat = self.activation(self.k_objects_fusion[t](h_feat))
             features.append(h_feat)
 
-        features = torch.stack(features, 1) # (batch, spl_resolution, ..., max_subset_size, feat)
-        features_agg = self.p_agg(features) # (batch, ..., max_subset_size, feat)
+        features = torch.stack(features, 1) # (batch, spl_resolution, ..., num_cluster, feat)
+        features_agg = self.p_agg(features) # (batch, ..., num_cluster, feat)
         return features_agg
 
     def cat_cond_feat(self, g_feat, cond_feat):

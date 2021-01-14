@@ -107,7 +107,7 @@ def train(cfg):
         ckpt = os.path.join(cfg.dataset.save_dir, 'ckpt', 'model.pt')
         ckpt = torch.load(ckpt, map_location=lambda storage, loc: storage)
         start_epoch = ckpt['epoch'] + 1
-        #best_val = ckpt['best_val']
+        # best_val = ckpt['best_val']
         model.load_state_dict(ckpt['state_dict'])
         optimizer.load_state_dict(ckpt['optimizer'])
     if cfg.dataset.question_type in ['frameqa', 'none']:
