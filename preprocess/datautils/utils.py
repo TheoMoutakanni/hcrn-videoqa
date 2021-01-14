@@ -239,7 +239,7 @@ def encode_data_BERT(bert_model, questions, answers, video_names, video_ids, cud
                 question_input_ids = question_input_ids.cuda()
                 question_attention_mask = question_attention_mask.cuda()
             with torch.no_grad():
-                question_bert = model(input_ids=question_input_ids, attention_mask=question_attention_mask).last_hidden_state.cpu().numpy()
+                question_bert = model(input_ids=question_input_ids, attention_mask=question_attention_mask)[0].cpu().numpy()
             feat_dset[batch_min:batch_max] = question_bert
         len_dset = fd.create_dataset('question_len', (dataset_size,), dtype=np.int32)
         len_dset[:] = questions_len_bert
