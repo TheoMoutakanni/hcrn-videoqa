@@ -84,7 +84,7 @@ if __name__ == '__main__':
     if args.cfg_file is not None:
         cfg_from_file(args.cfg_file)
 
-    assert cfg.dataset.name in ['tgif-qa', 'msrvtt-qa', 'msvd-qa']
+    assert cfg.dataset.name in ['tgif-qa', 'msrvtt-qa', 'msvd-qa', 'activitynet-qa']
     assert cfg.dataset.question_type in ['frameqa', 'count', 'transition', 'action', 'none']
     # check if the data folder exists
     assert os.path.exists(cfg.dataset.data_dir)
@@ -111,7 +111,6 @@ if __name__ == '__main__':
         cfg.dataset.motion_feat = os.path.join(cfg.dataset.data_dir, cfg.dataset.motion_feat.format(cfg.dataset.name, cfg.dataset.question_type))
         if cfg.bert.flag and 'precomputed' in cfg.bert.model:
             cfg.bert.test_question_feat = os.path.join(cfg.dataset.data_dir, cfg.bert.test_question_feat.format(cfg.dataset.name, cfg.dataset.question_type))
-
     else:
         cfg.dataset.question_type = 'none'
         cfg.dataset.appearance_feat = '{}_appearance_feat.h5'

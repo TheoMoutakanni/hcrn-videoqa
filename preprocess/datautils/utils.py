@@ -54,10 +54,10 @@ def create_vocab(questions, answers,
         total_ans = sum(item[1] for item in answer_counter.items())
         total_freq_ans = sum(item[1] for item in frequent_answers)
         print("Number of unique answers:", len(answer_counter))
+        # print(answer_counter.most_common(answer_top))
         print("Total number of answers:", total_ans)
         print("Top %i answers account for %f%%" %
               (len(frequent_answers), total_freq_ans * 100.0 / total_ans))
-
         for token, cnt in frequent_answers:
             answer_token_to_idx[token] = len(answer_token_to_idx)
         print('Get answer_token_to_idx, num: %d' % len(answer_token_to_idx))

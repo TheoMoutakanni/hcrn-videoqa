@@ -246,6 +246,7 @@ class FasterCRN(Module):
         self.p_agg = LambdaModule(lambda x: torch.mean(x, 1))
         self.spl_resolution = spl_resolution
         self.activation = nn.ELU()
+        self.ln = nn.LayerNorm(module_dim)
         self.max_subset_size = max_subset_size
 
     def forward(self, object_list, cond_feat):
@@ -263,6 +264,7 @@ class FasterCRN(Module):
                     self.gate_k_objects_fusion[t](h_feat))
             else:
                 h_feat = self.activation(self.k_objects_fusion[t](h_feat))
+            h_feat = self.ln(h_feat)
             features.append(h_feat)
 
         features = torch.stack(features, 1) # (batch, spl_resolution, ..., num_cluster, feat)
@@ -272,3 +274,48 @@ class FasterCRN(Module):
     def cat_cond_feat(self, g_feat, cond_feat):
         cond_feat_repeat = repeat_as(cond_feat, g_feat)
         return torch.cat((g_feat, cond_feat_repeat), dim=-1)
+
+
+class SoftAgg(Module):
+    def __init__(self, module_dim, num_objects, max_subset_size, gating=False, spl_resolution=1, dim=-2):
+        super(SoftAgg, self).__init__()
+        self.module_dim = module_dim
+        self.gating = gating
+
+        self.num_cluster = max_subset_size
+
+        self.k_objects_fusion = nn.ModuleList()
+        self.g_agg = nn.ModuleList()
+        if self.gating:
+            self.gate_k_objects_fusion = nn.ModuleList()
+        for t in range(spl_resolution):
+            self.k_objects_fusion.append(nn.Linear(module_dim, module_dim))
+            if self.num_cluster == 1:
+                self.g_agg.append(LambdaModule(lambda x: torch.mean(x, dim)))
+            else:
+                self.g_agg.append(NetRVlad(module_dim, self.num_cluster, dim=dim, flatten=False))
+            if self.gating:
+                self.gate_k_objects_fusion.append(nn.Linear(module_dim, module_dim))
+        self.p_agg = LambdaModule(lambda x: torch.mean(x, 1))
+        self.spl_resolution = spl_resolution
+        self.activation = nn.ELU()
+        self.max_subset_size = max_subset_size
+
+    def forward(self, object_list):
+        """
+        :param object_list: tensors (batch, ..., num_objects, feat)
+        :return: list of output objects
+        """
+        features = []
+        for t in range(self.spl_resolution):
+            g_feat = self.g_agg[t](object_list) # (batch, ..., num_cluster, feat)
+            if self.gating:
+                h_feat = self.activation(self.k_objects_fusion[t](g_feat)) * torch.sigmoid(
+                    self.gate_k_objects_fusion[t](g_feat))
+            else:
+                h_feat = self.activation(self.k_objects_fusion[t](g_feat))
+            features.append(h_feat)
+
+        features = torch.stack(features, 1) # (batch, spl_resolution, ..., num_cluster, feat)
+        features_agg = self.p_agg(features) # (batch, ..., num_cluster, feat)
+        return features_agg

@@ -66,6 +66,7 @@ def process_questions(args):
     with open(args.name2ids_pt.format(args.dataset), 'rb') as handle:
         name2ids = pickle.load(handle)
 
+    question_type = [d['type'] for d in answers_dict]
     questions = [d['question'] for d in questions_dict]
     answers = [d['answer'] for d in answers_dict]
     video_names = [d['video_name'] for d in questions_dict]

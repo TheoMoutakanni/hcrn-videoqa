@@ -44,8 +44,7 @@ class VideoQADataset(Dataset):
 
     def __init__(self, answers, ans_candidates, ans_candidates_len, questions, questions_len, video_ids, q_ids,
                  app_feature_h5, app_feat_id_to_index, motion_feature_h5, motion_feat_id_to_index,
-                 question_feature_h5=None, question_feat_id_to_index=None, attention_mask=None,
-                 app_feature_torch=None, motion_feature_torch=None):
+                 question_feature_h5=None, question_feat_id_to_index=None, attention_mask=None):
         # convert data to tensor
         self.all_answers = answers
         if question_feature_h5 is None:
@@ -60,11 +59,9 @@ class VideoQADataset(Dataset):
         self.all_video_ids = torch.LongTensor(np.asarray(video_ids))
         self.all_q_ids = q_ids
 
-        self.app_feature_torch = app_feature_torch
         self.app_feature_h5 = app_feature_h5
         self.dataset_app_feature = None
 
-        self.motion_feature_torch = motion_feature_torch
         self.motion_feature_h5 = motion_feature_h5
         self.dataset_motion_feature = None
 
@@ -103,21 +100,15 @@ class VideoQADataset(Dataset):
             question_len = self.dataset_question_feature['question_len'][question_idx]
             question = torch.from_numpy(question)
         
-        if self.app_feature_torch is None:
-            if self.dataset_app_feature is None:
-                self.dataset_app_feature = h5py.File(self.app_feature_h5, 'r') # , rdcc_nbytes=10 * (1024 ** 2), rdcc_nslots=5000, rdcc_w0=1)
-            appearance_feat = self.dataset_app_feature['resnet_features'][app_index]  # (8, 16, 2048)
-            appearance_feat = torch.from_numpy(appearance_feat)
-        else:
-            appearance_feat = self.app_feature_torch[app_index]
+        if self.dataset_app_feature is None:
+            self.dataset_app_feature = h5py.File(self.app_feature_h5, 'r') # , rdcc_nbytes=10 * (1024 ** 2), rdcc_nslots=5000, rdcc_w0=1)
+        appearance_feat = self.dataset_app_feature['resnet_features'][app_index]  # (8, 16, 2048)
+        appearance_feat = torch.from_numpy(appearance_feat).float()
 
-        if self.motion_feature_torch is None:
-            if self.dataset_motion_feature is None:
-                self.dataset_motion_feature = h5py.File(self.motion_feature_h5, 'r') #, rdcc_nbytes=10 * (1024 ** 2), rdcc_nslots=5000, rdcc_w0=1)
-            motion_feat = self.dataset_motion_feature['resnext_features'][motion_index]  # (8, 2048)
-            motion_feat = torch.from_numpy(motion_feat)
-        else:
-            motion_feat = self.motion_feature_torch[motion_index]
+        if self.dataset_motion_feature is None:
+            self.dataset_motion_feature = h5py.File(self.motion_feature_h5, 'r') #, rdcc_nbytes=10 * (1024 ** 2), rdcc_nslots=5000, rdcc_w0=1)
+        motion_feat = self.dataset_motion_feature['resnext_features'][motion_index]  # (8, 2048)
+        motion_feat = torch.from_numpy(motion_feat).float()
 
         if self.all_attention_mask is not None:
             attention_mask = self.all_attention_mask[index]
@@ -210,14 +201,9 @@ class VideoQADataLoader(DataLoader):
         with h5py.File(kwargs['motion_feat'], 'r') as motion_features_file:
             motion_video_ids = motion_features_file['ids'][()]
         motion_feat_id_to_index = {str(id): i for i, id in enumerate(motion_video_ids)}
+        video_ids = [id for id in video_ids if str(id) in app_feat_id_to_index.keys()]
         self.app_feature_h5 = kwargs.pop('appearance_feat')
         self.motion_feature_h5 = kwargs.pop('motion_feat')
-
-        app_feature_torch, motion_feature_torch = None, None
-        if 'name2ids' in kwargs:
-            out = load_activitynet_qa(
-                kwargs['appearance_feat_torch'], kwargs['motion_feat_torch'], kwargs['name2ids'])
-            app_feature_torch, motion_feature_torch, app_feat_id_to_index, motion_feat_id_to_index = out
 
         self.question_feature_h5 = None
         question_video_id_to_index = None
@@ -233,8 +219,7 @@ class VideoQADataLoader(DataLoader):
                                       video_ids, q_ids,
                                       self.app_feature_h5, app_feat_id_to_index, self.motion_feature_h5,
                                       motion_feat_id_to_index, question_feature_h5=self.question_feature_h5,
-                                      question_feat_id_to_index=question_video_id_to_index, attention_mask=attention_mask,
-                                      app_feature_torch=app_feature_torch, motion_feature_torch=motion_feature_torch)
+                                      question_feat_id_to_index=question_video_id_to_index, attention_mask=attention_mask)
 
         self.vocab = vocab
         self.batch_size = kwargs['batch_size']
@@ -244,18 +229,3 @@ class VideoQADataLoader(DataLoader):
 
     def __len__(self):
         return math.ceil(len(self.dataset) / self.batch_size)
-
-
-def load_activitynet_qa(resnet_path, resnext_path, name2ids_path, num_frames=16, num_clips=24):
-    with open(name2ids_path, 'rb') as handle:
-        name2ids = pickle.load(handle)
-
-    app_feature_torch = torch.load(resnet_path)
-    motion_feature_torch = torch.load(resnext_path)
-
-    for name in name2ids.keys():
-        frames = app_feature_torch[name].shape[0]
-
-    app_feat_id_to_index = {str(id): i for i, id in enumerate(motion_video_ids)}
-    motion_feat_id_to_index = {str(id): i for i, id in enumerate(motion_video_ids)}
-    return app_feature_torch, motion_feature_torch, app_feat_id_to_index, motion_feat_id_to_index

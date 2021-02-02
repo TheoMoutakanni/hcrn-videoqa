@@ -4,7 +4,7 @@ from torch.nn import functional as F
 from transformers import AutoModel
 
 from .utils import *
-from .CRN import CRN, FasterCRN
+from .CRN import CRN, FasterCRN, SoftAgg
 
 
 class FeatureAggregation(nn.Module):
@@ -38,6 +38,57 @@ class FeatureAggregation(nn.Module):
         return v_distill
 
 
+class PositionalEncoding(nn.Module):
+    def __init__(self, module_dim=512, dropout=0.1, max_len=5000):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        pe = torch.zeros(max_len, module_dim)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, module_dim, 2).float() * (-np.log(10000.0) / module_dim))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        self.pe = nn.Parameter(pe.unsqueeze(0).transpose(0, 1), requires_grad=False)
+
+    def forward(self, x):
+        x = x + self.pe[:x.size(0), :]
+        return self.dropout(x)
+
+
+class TransformerFeatureAggregation(nn.Module):
+    def __init__(self, module_dim=512, nhead=4, dropout=0.1):
+        super(BetterFeatureAggregation, self).__init__()
+        self.self_attn = nn.MultiheadAttention(module_dim, nhead, dropout=dropout)
+
+        self.pe = PositionalEncoding(module_dim=module_dim, dropout=dropout)
+
+        self.linear1 = nn.Linear(module_dim, module_dim)
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(module_dim, module_dim)
+
+        self.norm1 = nn.LayerNorm(module_dim)
+        self.norm2 = nn.LayerNorm(module_dim)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+
+        self.activation = nn.ReLU()
+
+    def forward(self, question_rep, visual_feature, questions_len):
+        max_len = question_rep.shape[1]
+        question_mask = torch.arange(max_len, device=question_rep.device).expand(len(questions_len), max_len) > questions_len.unsqueeze(1)
+        question_rep = self.pe(question_rep.transpose(0, 1))
+        visual_feature = visual_feature.transpose(0, 1)
+
+        src2 = self.self_attn(visual_feature, question_rep, question_rep, key_padding_mask=question_mask)[0]
+        src = visual_feature + self.dropout1(src2)
+        src = self.norm1(src)
+        src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
+        src = src + self.dropout2(src2)
+        src = self.norm2(src)
+        src = torch.mean(src, dim=0)
+        return src
+
+
 class InputUnitLinguistic(nn.Module):
     def __init__(self, vocab_size, wordvec_dim=300, rnn_dim=512, module_dim=512, bidirectional=True):
         super(InputUnitLinguistic, self).__init__()
@@ -64,13 +115,14 @@ class InputUnitLinguistic(nn.Module):
         return:
             question representation [Tensor] (batch_size, module_dim)
         """
+
         questions_embedding = self.encoder_embed(questions)  # (batch_size, seq_len, dim_word)
         embed = self.tanh(self.embedding_dropout(questions_embedding))
-        embed = nn.utils.rnn.pack_padded_sequence(embed, question_len, batch_first=True,
+        embed_packed = nn.utils.rnn.pack_padded_sequence(embed, question_len, batch_first=True,
                                                   enforce_sorted=False)
 
         self.encoder.flatten_parameters()
-        _, (question_embedding, _) = self.encoder(embed)
+        _, (question_embedding, _) = self.encoder(embed_packed)
         if self.bidirectional:
             question_embedding = torch.cat([question_embedding[0], question_embedding[1]], -1)
         question_embedding = self.question_dropout(question_embedding)
@@ -90,17 +142,17 @@ class InputUnitLinguisticPrecomputed(nn.Module):
 
         self.use_only_CLS = use_only_CLS
 
-        self.tanh = nn.Tanh()
-        self.embedding_dropout = nn.Dropout(p=0.15)
         if self.use_only_CLS:
             self.encoder_fc = nn.Linear(wordvec_dim, module_dim)
         else:
+            self.tanh = nn.Tanh()
+            self.embedding_dropout = nn.Dropout(p=0.15)
             self.encoder = nn.LSTM(wordvec_dim, rnn_dim, batch_first=True, bidirectional=bidirectional)
             self.question_dropout = nn.Dropout(p=0.18)
 
         self.module_dim = module_dim
 
-    def forward(self, questions_embedding, question_len):
+    def forward(self, question_embedding, question_len):
         """
         Args:
             questions_embedding: [Tensor] (batch_size, max_question_length, wordvec_dim)
@@ -109,16 +161,15 @@ class InputUnitLinguisticPrecomputed(nn.Module):
             question representation [Tensor] (batch_size, module_dim)
         """
         if self.use_only_CLS:
-            question_embedding = self.encoder_fc(questions_embedding[:,0,:])
-
-        question_embedding = self.tanh(self.embedding_dropout(question_embedding))
+            question_embedding = self.encoder_fc(question_embedding[:,0,:])
 
         if not self.use_only_CLS:
-            embed = nn.utils.rnn.pack_padded_sequence(question_embedding, question_len, batch_first=True,
+            # question_embedding = self.tanh(self.embedding_dropout(question_embedding))
+            embed_packed = nn.utils.rnn.pack_padded_sequence(question_embedding, question_len, batch_first=True,
                                                       enforce_sorted=False)
 
             self.encoder.flatten_parameters()
-            _, (question_embedding, _) = self.encoder(embed)
+            _, (question_embedding, _) = self.encoder(embed_packed)
             if self.bidirectional:
                 question_embedding = torch.cat([question_embedding[0], question_embedding[1]], -1)
             question_embedding = self.question_dropout(question_embedding)
@@ -146,7 +197,7 @@ class InputUnitLinguisticTransformers(nn.Module):
         if bidirectional:
             rnn_dim = rnn_dim // 2
 
-        self.tanh = nn.Tanh()
+        # self.tanh = nn.Tanh()
         self.encoder = nn.LSTM(768, rnn_dim, batch_first=True, bidirectional=bidirectional)
         self.embedding_dropout = nn.Dropout(p=0.15)
         self.question_dropout = nn.Dropout(p=0.18)
@@ -163,8 +214,8 @@ class InputUnitLinguisticTransformers(nn.Module):
         """
         questions_inputs_ids, questions_attention_mask = questions_tokens
         output_transformer = self.transformer(input_ids=questions_inputs_ids, attention_mask=questions_attention_mask)
-        questions_embedding = output_transformer[0]
-        embed = self.tanh(self.embedding_dropout(questions_embedding))
+        embed = output_transformer[0]
+        # embed = self.tanh(self.embedding_dropout(embed))
         embed = nn.utils.rnn.pack_padded_sequence(embed, question_len, batch_first=True,
                                                   enforce_sorted=False)
 
@@ -346,14 +397,14 @@ class FasterInputUnitVisual(nn.Module):
         super(FasterInputUnitVisual, self).__init__()
 
         self.clip_level_motion_cond = FasterCRN(module_dim, k_max_frame_level, k_max_frame_level, gating=False, spl_resolution=spl_resolution)
-        self.clip_level_question_cond = FasterCRN(module_dim, k_max_frame_level, k_max_frame_level, gating=True, spl_resolution=spl_resolution) #-2
+        self.clip_level_question_cond = SoftAgg(module_dim, k_max_frame_level, k_max_frame_level, gating=True, spl_resolution=spl_resolution)
         self.video_level_motion_cond = FasterCRN(module_dim, k_max_clip_level, k_max_clip_level, gating=False, spl_resolution=spl_resolution)
-        self.video_level_question_cond = FasterCRN(module_dim, k_max_clip_level, k_max_clip_level, gating=True, spl_resolution=spl_resolution) #-2
+        self.video_level_question_cond = SoftAgg(module_dim, k_max_clip_level, k_max_clip_level, gating=True, spl_resolution=spl_resolution)
 
         self.subvids = subvids
         if subvids > 0:
             self.subvid_level_motion_cond = FasterCRN(module_dim, subvids, subvids, gating=False, spl_resolution=spl_resolution)
-            self.subvid_level_question_cond = FasterCRN(module_dim, subvids, subvids, gating=True, spl_resolution=spl_resolution)
+            self.subvid_level_question_cond = SoftAgg(module_dim, subvids, subvids, gating=True, spl_resolution=spl_resolution)
             self.subvid_level_motion_proj = nn.Linear(module_dim, module_dim)
 
         self.sequence_encoder = nn.LSTM(vision_dim, module_dim, batch_first=True, bidirectional=False)
@@ -384,7 +435,7 @@ class FasterInputUnitVisual(nn.Module):
 
         # clip level CRNs
         crn_motion = self.clip_level_motion_cond(appearance_proj, motion_proj)
-        crn_question = self.clip_level_question_cond(crn_motion, question_embedding_proj)
+        crn_question = self.clip_level_question_cond(crn_motion) #, question_embedding_proj)
         clip_level_crn_outputs = crn_question.transpose(1, 2)
 
         if self.subvids > 0:
@@ -398,7 +449,7 @@ class FasterInputUnitVisual(nn.Module):
             clip_level_crn_outputs = clip_level_crn_outputs.view(batch_size, clip_level_crn_outputs.shape[1], nb_subvids, self.subvids, self.module_dim)
 
             subvid_level_crn_motion = self.subvid_level_motion_cond(clip_level_crn_outputs, subvid_level_motion_feat_proj)
-            subvid_level_crn_question = self.subvid_level_question_cond(subvid_level_crn_motion, question_embedding_proj)
+            subvid_level_crn_question = self.subvid_level_question_cond(subvid_level_crn_motion) #, question_embedding_proj)
 
             subvid_level_crn_output = subvid_level_crn_question.view(batch_size, -1, nb_subvids, self.module_dim)
             next_level_inputs = subvid_level_crn_output
@@ -412,10 +463,9 @@ class FasterInputUnitVisual(nn.Module):
 
         # video level CRNs
         video_level_crn_motion = self.video_level_motion_cond(clip_level_crn_outputs, video_level_motion_feat_proj)
-        video_level_crn_question = self.video_level_question_cond(video_level_crn_motion, question_embedding_proj.unsqueeze(1))
+        video_level_crn_question = self.video_level_question_cond(video_level_crn_motion) #, question_embedding_proj.unsqueeze(1))
 
         video_level_crn_output = video_level_crn_question.view(batch_size, -1, self.module_dim)
-
         return video_level_crn_output
 
 
@@ -545,8 +595,10 @@ class HCRNNetwork(nn.Module):
         batch_size = question_len.size(0)
         if self.question_type in ['frameqa', 'count', 'none']:
             # get image, word, and sentence embeddings
-            question_embedding = self.linguistic_input_unit(question, question_len)
-            visual_embedding = self.visual_input_unit(video_appearance_feat, video_motion_feat, question_embedding)
+            question_embedding = self.linguistic_input_unit(question, question_len.cpu())
+            # visual_embedding = self.visual_input_unit(video_appearance_feat, video_motion_feat, question_embedding)
+            visual_embedding = self.visual_input_unit(video_appearance_feat, video_motion_feat,
+                torch.zeros(question_embedding.shape, device=question_embedding.device))
 
             visual_embedding = self.feature_aggregation(question_embedding, visual_embedding)
 

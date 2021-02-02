@@ -4,6 +4,20 @@ import torch
 from tqdm import tqdm
 
 import matplotlib.pyplot as plt
+import matplotlib as mpl
+import seaborn as sns
+sns.set_style('ticks')
+params = {
+   'axes.labelsize': 8,
+   #'text.fontsize': 8,
+   'legend.fontsize': 10,
+   'xtick.labelsize': 10,
+   'ytick.labelsize': 10,
+   'text.usetex': False,
+   'figure.figsize': [3.5, 4.5],
+   'axes.prop_cycle': mpl.cycler(color=sns.color_palette("coolwarm_r",3))
+}
+mpl.rcParams.update(params)
 
 from utils import todevice
 import model.HCRN as HCRN
@@ -15,6 +29,7 @@ def autolabel(rects):
                     xy=(rect.get_x() + rect.get_width() / 2, height),
                     xytext=(0, 3),  # 3 points vertical offset
                     textcoords="offset points",
+                    fontsize=8,
                     ha='center', va='bottom')
 
 def time_model(models, model_kwargs, batch_size, num_clips, backward=False):
@@ -110,28 +125,33 @@ width = 0.35  # the width of the bars
 
 times = time_model(models, model_kwargs, batch_size, num_clips)
 times = np.round(times, 4)
-
+"""
 fig, ax = plt.subplots()
+ax.grid(axis='y', color="0.9", linestyle='-', linewidth=0.5)
 rects1 = ax.bar(x, times, width)
 
 ax.set_ylabel('Time (s)')
 #plt.semilogy()
 ax.set_xticks(x)
 ax.set_xticklabels(models)
-ax.legend()
 
 autolabel(rects1)
 
 fig.tight_layout()
-plt.savefig('./img/time.png', dpi=200)
-
+sns.despine(left=True)
+plt.savefig('./img/time.png', dpi=200, transparent=False, bbox_inches='tight')
+"""
 #################
 
 times_back = time_model(models, model_kwargs, batch_size, num_clips, backward=True)
 times_back = np.round(times_back, 4)
 
 fig, ax = plt.subplots()
-rects1 = ax.bar(x, times_back, width)
+ax.grid(axis='y', color="0.9", linestyle='-', linewidth=0.5)
+
+rects1 = ax.bar(x - width/2, times_back, width, label='training w/ backprop')
+ax.bar(0, 0, 0)
+rects2 = ax.bar(x + width/2, times, width, label='inference')
 
 ax.set_ylabel('Time (s)')
 #plt.semilogy()
@@ -140,32 +160,48 @@ ax.set_xticklabels(models)
 ax.legend()
 
 autolabel(rects1)
+autolabel(rects2)
 
 fig.tight_layout()
-plt.savefig('./img/time_back.png', dpi=200)
+sns.despine(left=True)
+plt.savefig('./img/time.png', dpi=200, transparent=False, bbox_inches='tight')
 
 #################
 
 batch_size = 128
 
-times_batch = time_model(models, model_kwargs, batch_size, num_clips)
-times_batch = np.round(times_batch, 4)
+times_batch_128 = time_model(models, model_kwargs, batch_size, num_clips)
+times_batch_128 = np.round(times_batch_128, 4)
+
+#################
+
+batch_size = 256
+
+times_batch_256 = time_model(models, model_kwargs, batch_size, num_clips)
+times_batch_256 = np.round(times_batch_256, 4)
 
 fig, ax = plt.subplots()
-rects2 = ax.bar(x - width/2, times, width, label='batch_size=32')
-rects3 = ax.bar(x + width/2, times_batch, width, label='batch_size=128')
+ax.grid(axis='y', color="0.9", linestyle='-', linewidth=0.5)
+ax.set_prop_cycle(mpl.cycler(color=sns.color_palette("coolwarm_r",3)))
+
+rects1 = ax.bar(1.33*x - width, times_batch_256, width, label='batch_size=256')
+rects2 = ax.bar(1.33*x, times_batch_128, width, label='batch_size=128')
+rects3 = ax.bar(1.33*x + width, times, width, label='batch_size=32')
 
 ax.set_ylabel('Time (s)')
 #plt.semilogy()
-ax.set_xticks(x)
+ax.set_xticks(1.33*x)
 ax.set_xticklabels(models)
 ax.legend()
 
+autolabel(rects1)
 autolabel(rects2)
 autolabel(rects3)
 
 fig.tight_layout()
-plt.savefig('./img/time_batch.png', dpi=200)
+sns.despine(left=True)
+plt.savefig('./img/time_batch.png', dpi=200, transparent=False, bbox_inches='tight')
+
 #################
 
 batch_size = 32
@@ -178,14 +214,17 @@ times_clips = np.round(times_clips, 4)
 
 for hcrn_model in models:
     model_kwargs[hcrn_model]['subvids'] = 6
+    model_kwargs[hcrn_model]['k_max_clip_level'] //= 2
 num_clips = 24
 
 times_levels = time_model(models, model_kwargs, batch_size, num_clips)
 times_levels = np.round(times_levels, 4)
 
 fig, ax = plt.subplots()
+ax.grid(axis='y', color="0.9", linestyle='-', linewidth=0.5)
 
 rects2 = ax.bar(x - width/2, times_clips, width, label='2 levels')
+ax.bar(0, 0, 0)
 rects3 = ax.bar(x + width/2, times_levels, width, label='3 levels')
 
 ax.set_ylabel('Time (s)')
@@ -198,6 +237,7 @@ autolabel(rects2)
 autolabel(rects3)
 
 fig.tight_layout()
-plt.savefig('./img/time_24clips.png', dpi=200)
+sns.despine(left=True)
+plt.savefig('./img/time_24clips.png', dpi=200, transparent=False, bbox_inches='tight')
 
 ################

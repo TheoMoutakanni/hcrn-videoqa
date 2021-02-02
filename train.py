@@ -14,7 +14,7 @@ logFormatter = logging.Formatter('%(asctime)s %(levelname)-8s %(message)s')
 rootLogger = logging.getLogger()
 
 from DataLoader import VideoQADataLoader
-from utils import todevice
+from utils import todevice, process_activitynet
 from validate import validate
 
 import model.HCRN as HCRN
@@ -40,10 +40,6 @@ def train(cfg):
         if 'precomputed' in cfg.bert.model:
             train_loader_kwargs['question_feat'] = cfg.bert.train_question_feat
         train_loader_kwargs['bert_model'] = cfg.bert.model
-    if cfg.dataset.name == 'activitynet-qa':
-        train_loader_kwargs['name2ids'] = 'data/activitynet-qa/name2ids.pt'
-        train_loader_kwargs['appearance_feat_torch'] = 'data/activitynet-qa/resnet_4fps.pth'
-        train_loader_kwargs['motion_feat_torch'] = 'data/activitynet-qa/resnext_1fps.pth'
 
     train_loader = VideoQADataLoader(**train_loader_kwargs)
     logging.info("number of train instances: {}".format(len(train_loader.dataset)))
@@ -281,7 +277,7 @@ def main():
     if args.cfg_file is not None:
         cfg_from_file(args.cfg_file)
 
-    assert cfg.dataset.name in ['tgif-qa', 'msrvtt-qa', 'msvd-qa']
+    assert cfg.dataset.name in ['tgif-qa', 'msrvtt-qa', 'msvd-qa', 'activitynet-qa']
     assert cfg.dataset.question_type in ['frameqa', 'count', 'transition', 'action', 'none']
     # check if the data folder exists
     assert os.path.exists(cfg.dataset.data_dir)
@@ -291,7 +287,6 @@ def main():
 
     # check if bert and glove are not set in the same cfg
     assert not (cfg.train.glove and cfg.bert.flag)
-
 
     if not cfg.multi_gpus:
         torch.cuda.set_device(cfg.gpu_id)
@@ -328,18 +323,6 @@ def main():
             cfg.bert.train_question_feat = os.path.join(cfg.dataset.data_dir, cfg.bert.train_question_feat.format(cfg.dataset.name, cfg.dataset.question_type))
             cfg.bert.val_question_feat = os.path.join(cfg.dataset.data_dir, cfg.bert.val_question_feat.format(cfg.dataset.name, cfg.dataset.question_type))
 
-    elif cfg.dataset.name == 'activitynet-qa':
-        cfg.dataset.train_question_pt = os.path.join(cfg.dataset.data_dir,
-                                                     cfg.dataset.train_question_pt.format(cfg.dataset.name, cfg.dataset.question_type))
-        cfg.dataset.val_question_pt = os.path.join(cfg.dataset.data_dir,
-                                                   cfg.dataset.val_question_pt.format(cfg.dataset.name, cfg.dataset.question_type))
-        cfg.dataset.vocab_json = os.path.join(cfg.dataset.data_dir, cfg.dataset.vocab_json.format(cfg.dataset.name, cfg.dataset.question_type))
-
-        cfg.dataset.appearance_feat = os.path.join(cfg.dataset.data_dir, cfg.dataset.appearance_feat.format(cfg.dataset.name, cfg.dataset.question_type))
-        cfg.dataset.motion_feat = os.path.join(cfg.dataset.data_dir, cfg.dataset.motion_feat.format(cfg.dataset.name, cfg.dataset.question_type))
-        if cfg.bert.flag and 'precomputed' in cfg.bert.model:
-            cfg.bert.train_question_feat = os.path.join(cfg.dataset.data_dir, cfg.bert.train_question_feat.format(cfg.dataset.name, cfg.dataset.question_type))
-            cfg.bert.val_question_feat = os.path.join(cfg.dataset.data_dir, cfg.bert.val_question_feat.format(cfg.dataset.name, cfg.dataset.question_type))
     else:
         cfg.dataset.question_type = 'none'
         cfg.dataset.appearance_feat = '{}_appearance_feat.h5'
@@ -361,6 +344,12 @@ def main():
             cfg.bert.val_question_feat = '{}_val_questions_feat.h5'
             cfg.bert.val_question_feat = os.path.join(cfg.dataset.data_dir, cfg.bert.val_question_feat.format(cfg.dataset.name))
 
+    if cfg.dataset.name == 'activitynet-qa':
+        if False:
+            appearance_feat_torch = 'data/activitynet-qa/resnet_4fps.pth'
+            motion_feat_torch = 'data/activitynet-qa/resnext_1fps.pth'
+            name2ids = 'data/activitynet-qa/name2ids.pt'
+            process_activitynet(appearance_feat_torch, motion_feat_torch, name2ids, cfg.dataset.appearance_feat, cfg.dataset.motion_feat)
 
     # set random seed
     torch.manual_seed(cfg.seed)
